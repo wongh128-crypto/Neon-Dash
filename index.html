@@ -94,25 +94,86 @@
             box-shadow: 0 0 20px #0ff;
             transform: scale(1.05);
         }
+
+        #skinsList {
+            touch-action: pan-y; /* Allows vertical scrolling on touch devices */
+        }
+
+        /* Scrollbar styling for skins list */
+        #skinsList::-webkit-scrollbar {
+            width: 8px;
+        }
+        #skinsList::-webkit-scrollbar-thumb {
+            background: #0ff;
+            border-radius: 4px;
+        }
+        #skinsList::-webkit-scrollbar-track {
+            background: rgba(0, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        /* Notification System Styling */
+        #notificationArea {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .notification {
+            background: rgba(10, 10, 10, 0.9);
+            border: 2px solid #0ff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: #fff;
+            transform: translateX(150%);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-align: right;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
     </style>
 </head>
 <body>
 
     <div id="score-display">SCORE: <span id="scoreValue">0</span></div>
+    
+    <!-- Notification Area -->
+    <div id="notificationArea"></div>
 
     <div id="ui-layer">
         <!-- Start Screen -->
         <div id="startScreen" class="screen">
             <h1 style="color: #0ff; text-shadow: 0 0 15px #0ff;">NEON DASH</h1>
             <p>Drag or use your mouse to move.<br>Dodge the RED obstacles.<br>Collect GREEN gems for bonus points.</p>
-            <button id="startBtn">Play Now</button>
+            <div style="display: flex; gap: 20px; justify-content: center;">
+                <button id="startBtn">Play Now</button>
+                <button id="skinsBtn">Armory</button>
+            </div>
+        </div>
+
+        <!-- Skins Screen -->
+        <div id="skinsScreen" class="screen hidden" style="width: 350px;">
+            <h1 style="color: #0ff; text-shadow: 0 0 15px #0ff; font-size: 36px;">ARMORY</h1>
+            <p style="margin-bottom: 15px; font-size: 14px;">Select your ship's appearance.</p>
+            <div id="skinsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; margin-bottom: 20px; padding-right: 10px; text-align: left;">
+                <!-- Skin items injected via JS -->
+            </div>
+            <button id="backToMenuBtn">Back to Menu</button>
         </div>
 
         <!-- Game Over Screen -->
         <div id="gameOverScreen" class="screen hidden">
             <h1 style="color: #f00; text-shadow: 0 0 15px #f00;">SYSTEM FAILURE</h1>
             <p>Final Score: <span id="finalScore" style="color:#0ff; font-weight:bold; font-size: 24px;">0</span></p>
-            <button id="restartBtn">Reboot System</button>
+            <button id="homeBtn">Return to Base</button>
         </div>
     </div>
 
@@ -129,6 +190,7 @@
         let width, height;
         let gameState = 'start'; // start, playing, gameover, cutscene
         let score = 0;
+        let highScore = 0;
         let frameCount = 0;
         let difficultyMultiplier = 1;
 
@@ -157,6 +219,19 @@
         let nextUpgradeScore = 1000;
         let upgradeFlashAlpha = 0;
         let mothershipY = -200;
+
+        // --- Skin Variables ---
+        let unlockedSkins = ['cyan'];
+        let equippedSkin = 'cyan';
+        const skins = [
+            { id: 'cyan', color: '#0ff', name: 'Classic Cyan', req: 0, desc: 'Default issue chassis.' },
+            { id: 'magenta', color: '#f0f', name: 'Neon Magenta', req: 500, desc: 'Unlocks at 500 pts' },
+            { id: 'lime', color: '#0f0', name: 'Lime Venom', req: 1000, desc: 'Unlocks at 1000 pts' },
+            { id: 'gold', color: '#ffd700', name: 'Solar Flare', req: 1500, desc: 'Unlocks at 1500 pts' },
+            { id: 'purple', color: '#8a2be2', name: 'Deep Void', req: 2000, desc: 'Unlocks at 2000 pts' },
+            { id: 'blood', color: '#ff0044', name: 'Blood Moon', req: 2500, desc: 'Unlocks at 2500 pts' },
+            { id: 'secret67', color: '#ff3300', name: 'Glitch 67', req: -1, desc: 'Classified requirement.' }
+        ];
 
         // Setup Canvas
         function resize() {
@@ -194,11 +269,110 @@
         window.addEventListener('mousemove', updateTarget);
         window.addEventListener('touchmove', updateTarget, {passive: false});
         
-        // Prevent default touch behavior (scrolling)
-        document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+        // Prevent default touch behavior (scrolling) except in the skins menu
+        document.addEventListener('touchmove', function(e) { 
+            if (e.target.closest('#skinsList')) return; // Exception for the armory list
+            e.preventDefault(); 
+        }, { passive: false });
 
         document.getElementById('startBtn').addEventListener('click', startGame);
-        document.getElementById('restartBtn').addEventListener('click', startGame);
+        
+        // Return to Home Screen from Game Over
+        document.getElementById('homeBtn').addEventListener('click', () => {
+            gameOverScreen.classList.add('hidden');
+            startScreen.classList.remove('hidden');
+            gameState = 'start';
+            scoreValue.innerText = '0';
+            
+            // Reset player position for the menu background
+            player.x = width / 2;
+            player.y = height / 1.5;
+            player.targetX = player.x;
+            player.targetY = player.y;
+            
+            ctx.clearRect(0, 0, width, height); // Clear the game over frame
+        });
+        
+        // Armory Menu Navigation
+        document.getElementById('skinsBtn').addEventListener('click', () => {
+            startScreen.classList.add('hidden');
+            document.getElementById('skinsScreen').classList.remove('hidden');
+            renderSkins();
+        });
+
+        document.getElementById('backToMenuBtn').addEventListener('click', () => {
+            document.getElementById('skinsScreen').classList.add('hidden');
+            startScreen.classList.remove('hidden');
+        });
+
+        function renderSkins() {
+            const list = document.getElementById('skinsList');
+            list.innerHTML = '';
+            skins.forEach(s => {
+                const isUnlocked = unlockedSkins.includes(s.id);
+                const isEquipped = equippedSkin === s.id;
+                
+                const div = document.createElement('div');
+                div.style.padding = '10px';
+                div.style.border = `2px solid ${isUnlocked ? s.color : '#333'}`;
+                div.style.borderRadius = '5px';
+                div.style.display = 'flex';
+                div.style.justifyContent = 'space-between';
+                div.style.alignItems = 'center';
+                div.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                
+                let btnHtml = '';
+                if (isUnlocked) {
+                    if (isEquipped) {
+                        btnHtml = `<button disabled style="padding: 5px 10px; font-size: 14px; border-color: #555; color: #555; box-shadow: none; cursor: default;">Equipped</button>`;
+                    } else {
+                        btnHtml = `<button onclick="equipSkin('${s.id}')" style="padding: 5px 10px; font-size: 14px; border-color: ${s.color}; color: ${s.color}; text-shadow: 0 0 5px ${s.color};">Equip</button>`;
+                    }
+                } else {
+                    btnHtml = `<span style="font-size: 14px; color: #555; font-weight: bold;">LOCKED</span>`;
+                }
+
+                div.innerHTML = `
+                    <div style="flex-grow: 1;">
+                        <div style="font-weight: bold; font-size: 16px; color: ${isUnlocked ? s.color : '#555'}; text-shadow: 0 0 5px ${isUnlocked ? s.color : 'transparent'};">
+                            ${isUnlocked || s.req !== -1 ? s.name : '???'}
+                        </div>
+                        <div style="font-size: 12px; color: ${isUnlocked ? '#ccc' : '#444'}; margin-top: 4px;">
+                            ${isUnlocked && s.req === -1 ? 'Unlocked via Secret 67' : s.desc}
+                        </div>
+                    </div>
+                    <div>${btnHtml}</div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        window.equipSkin = function(id) {
+            equippedSkin = id;
+            player.color = skins.find(s => s.id === id).color;
+            renderSkins();
+        };
+
+        // Notification System
+        function showNotification(title, message, color) {
+            const notifArea = document.getElementById('notificationArea');
+            const notif = document.createElement('div');
+            notif.className = 'notification';
+            notif.style.borderColor = color;
+            notif.style.boxShadow = `0 0 15px ${color}`;
+            notif.innerHTML = `<strong style="color:${color}; font-size: 18px;">${title}</strong><br><span style="color:#ccc; font-size: 14px;">${message}</span>`;
+            
+            notifArea.appendChild(notif);
+
+            // Trigger slide in
+            setTimeout(() => notif.classList.add('show'), 10);
+
+            // Trigger slide out and remove
+            setTimeout(() => {
+                notif.classList.remove('show');
+                setTimeout(() => notif.remove(), 500);
+            }, 4000);
+        }
 
         function startGame() {
             gameState = 'playing';
@@ -229,6 +403,7 @@
             cutsceneTimer = 90;
             cutsceneText = 'SYSTEM START';
             
+            player.color = skins.find(s => s.id === equippedSkin).color; // Apply active skin
             player.x = width / 2;
             player.y = height + 50; // Start off-screen
             player.targetX = width / 2;
@@ -249,7 +424,18 @@
 
         function updateScore(points) {
             score += points;
-            scoreValue.innerText = Math.floor(score);
+            const currentIntScore = Math.floor(score);
+            scoreValue.innerText = currentIntScore;
+            
+            if (currentIntScore > highScore) highScore = currentIntScore;
+            
+            // Check for skin unlocks mid-game
+            skins.forEach(s => {
+                if (s.req > 0 && highScore >= s.req && !unlockedSkins.includes(s.id)) {
+                    unlockedSkins.push(s.id);
+                    showNotification('SKIN UNLOCKED', s.name, s.color);
+                }
+            });
         }
 
         // --- Entity Creation ---
@@ -448,10 +634,18 @@
                     }
 
                     if (cutsceneTimer <= 0) {
-                        createExplosion(player.x, player.y, player.color, 100); // Massive final cyan explosion
+                        const finalIntScore = Math.floor(score);
+                        
+                        // Secret Skin unlock logic
+                        if (finalIntScore === 67 && !unlockedSkins.includes('secret67')) {
+                            unlockedSkins.push('secret67');
+                            showNotification('SECRET UNLOCKED', 'Glitch 67', '#ff3300');
+                        }
+
+                        createExplosion(player.x, player.y, player.color, 100); // Massive final explosion
                         gameState = 'gameover';
                         gameOverScreen.classList.remove('hidden');
-                        finalScore.innerText = Math.floor(score);
+                        finalScore.innerText = finalIntScore;
                         screenShake = 0;
                     }
                 } else if (cutsceneType === 'upgrade') {
