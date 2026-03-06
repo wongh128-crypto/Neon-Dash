@@ -127,10 +127,15 @@
         const finalScore = document.getElementById('finalScore');
         
         let width, height;
-        let gameState = 'start'; // start, playing, gameover
+        let gameState = 'start'; // start, playing, gameover, cutscene
         let score = 0;
         let frameCount = 0;
         let difficultyMultiplier = 1;
+
+        let cutsceneTimer = 0;
+        let cutsceneType = '';
+        let cutsceneText = '';
+        let screenShake = 0;
 
         // Entities
         let player = { x: 0, y: 0, targetX: 0, targetY: 0, size: 15, color: '#0ff' };
@@ -165,7 +170,7 @@
 
         // Input Handling
         function updateTarget(e) {
-            if (gameState !== 'playing') return;
+            if (gameState !== 'playing' && !(gameState === 'cutscene' && cutsceneType === 'boss_defeat')) return;
             
             let clientX, clientY;
             if (e.touches && e.touches.length > 0) {
@@ -208,20 +213,27 @@
             boss.active = false;
             boss.state = 'hidden';
             
+            gameState = 'cutscene';
+            cutsceneType = 'intro';
+            cutsceneTimer = 90;
+            cutsceneText = 'SYSTEM START';
+            
             player.x = width / 2;
-            player.y = height / 1.5;
-            player.targetX = player.x;
-            player.targetY = player.y;
+            player.y = height + 50; // Start off-screen
+            player.targetX = width / 2;
+            player.targetY = height / 1.5;
             
             updateScore(0);
             gameLoop();
         }
 
         function gameOver() {
-            gameState = 'gameover';
-            gameOverScreen.classList.remove('hidden');
-            finalScore.innerText = Math.floor(score);
-            createExplosion(player.x, player.y, '#0ff', 40); // Player explosion
+            if (gameState === 'cutscene') return; // Prevent triggering multiple times
+            
+            gameState = 'cutscene';
+            cutsceneType = 'player_death';
+            cutsceneTimer = 90; // 1.5 seconds of getting bombarded
+            cutsceneText = 'SYSTEM FAILURE';
         }
 
         function updateScore(points) {
@@ -304,7 +316,8 @@
                 vx: 0,
                 vy: 4,
                 speed: 4 + (bossLevel * 0.5),
-                color: '#f40' // Red-orange
+                color: '#f40', // Red-orange
+                life: 150 // Missile lifespan before self-destruct
             });
         }
 
@@ -327,6 +340,100 @@
 
         // --- Main Game Logic ---
         function update() {
+            if (gameState === 'cutscene') {
+                frameCount++;
+                cutsceneTimer--;
+
+                // Update particles so explosions animate
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    let p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life -= p.decay;
+                    
+                    if (p.life <= 0) {
+                        particles.splice(i, 1);
+                    }
+                }
+
+                if (cutsceneType === 'intro') {
+                    // Smooth fly-in
+                    player.y += (player.targetY - player.y) * 0.05;
+                    if (cutsceneTimer <= 0) {
+                        gameState = 'playing';
+                    }
+                } else if (cutsceneType === 'boss_defeat') {
+                    // Allow player movement during boss defeat
+                    const ease = 0.15;
+                    player.x += (player.targetX - player.x) * ease;
+                    player.y += (player.targetY - player.y) * ease;
+                    
+                    // Keep player in bounds
+                    player.x = Math.max(player.size, Math.min(width - player.size, player.x));
+                    player.y = Math.max(player.size, Math.min(height - player.size, player.y));
+
+                    // Boss exploding effects
+                    if (cutsceneTimer % 5 === 0) {
+                        createExplosion(boss.x + (Math.random() - 0.5) * boss.size * 2, boss.y + (Math.random() - 0.5) * boss.size * 2, '#ff0', 5);
+                        createExplosion(boss.x + (Math.random() - 0.5) * boss.size * 2, boss.y + (Math.random() - 0.5) * boss.size * 2, boss.color, 5);
+                    }
+                    screenShake = 8; // Intense shake
+
+                    if (cutsceneTimer <= 0) {
+                        createExplosion(boss.x, boss.y, boss.color, 150);
+                        boss.active = false;
+                        updateScore(500 * bossLevel);
+                        nextBossScore = score + 500 * bossLevel + 300;
+                        bossLevel++;
+                        gameState = 'playing';
+                        screenShake = 0;
+                    }
+                } else if (cutsceneType === 'player_death') {
+                    // Screen shake
+                    screenShake = 10;
+                    
+                    // Spawn red orbs rapidly targeting the player
+                    if (cutsceneTimer % 3 === 0) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const dist = Math.max(width, height) * 0.8;
+                        obstacles.push({
+                            x: player.x + Math.cos(angle) * dist,
+                            y: player.y + Math.sin(angle) * dist,
+                            size: 10,
+                            speedX: -Math.cos(angle) * 20, // Fast incoming speed
+                            speedY: -Math.sin(angle) * 20,
+                            color: '#f00',
+                            rotation: 0,
+                            rotationSpeed: 0
+                        });
+                    }
+
+                    // Move obstacles towards player and explode on impact
+                    for (let i = obstacles.length - 1; i >= 0; i--) {
+                        let obs = obstacles[i];
+                        obs.x += obs.speedX;
+                        obs.y += obs.speedY;
+                        obs.rotation += obs.rotationSpeed;
+                        
+                        const dx = player.x - obs.x;
+                        const dy = player.y - obs.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < player.size + (obs.size * 0.8)) {
+                            createExplosion(player.x, player.y, '#f00', 8);
+                            obstacles.splice(i, 1);
+                        }
+                    }
+
+                    if (cutsceneTimer <= 0) {
+                        createExplosion(player.x, player.y, player.color, 100); // Massive final cyan explosion
+                        gameState = 'gameover';
+                        gameOverScreen.classList.remove('hidden');
+                        finalScore.innerText = Math.floor(score);
+                        screenShake = 0;
+                    }
+                }
+                return; // Skip the rest of the update loop
+            }
+
             frameCount++;
             
             // Difficulty scaling
@@ -419,11 +526,10 @@
                         
                         // Boss defeat
                         if (boss.health <= 0) {
-                            createExplosion(boss.x, boss.y, boss.color, 100);
-                            boss.active = false;
-                            updateScore(500 * bossLevel);
-                            nextBossScore = score + 500 * bossLevel + 300;
-                            bossLevel++;
+                            gameState = 'cutscene';
+                            cutsceneType = 'boss_defeat';
+                            cutsceneTimer = 120;
+                            cutsceneText = 'TARGET DESTROYED';
                         }
                         continue;
                     }
@@ -476,6 +582,8 @@
             for (let i = missiles.length - 1; i >= 0; i--) {
                 let m = missiles[i];
                 
+                m.life--;
+                
                 // Homing logic towards player
                 const dxToPlayer = player.x - m.x;
                 const dyToPlayer = player.y - m.y;
@@ -502,9 +610,36 @@
                     });
                 }
 
+                // Check bullet collisions with missile
+                let missileDestroyed = false;
+                for (let k = bullets.length - 1; k >= 0; k--) {
+                    let b = bullets[k];
+                    const dx = b.x - m.x;
+                    const dy = b.y - m.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < m.size + b.size) {
+                        createExplosion(m.x, m.y, m.color, 15); // Explode on hit
+                        bullets.splice(k, 1);
+                        missiles.splice(i, 1);
+                        missileDestroyed = true;
+                        break;
+                    }
+                }
+                
+                if (missileDestroyed) continue;
+
+                // Self-destruct after time
+                if (m.life <= 0) {
+                    createExplosion(m.x, m.y, m.color, 15); // Self-destruct explosion
+                    missiles.splice(i, 1);
+                    continue;
+                }
+
                 // Collision with player
                 if (distToPlayer < player.size + m.size) {
+                    createExplosion(m.x, m.y, m.color, 20); // Explode against player
+                    missiles.splice(i, 1);
                     gameOver();
+                    continue;
                 }
 
                 // Remove if off screen
@@ -574,10 +709,17 @@
             ctx.fillStyle = 'rgba(5, 5, 5, 0.3)';
             ctx.fillRect(0, 0, width, height);
             
+            ctx.save();
+            if (screenShake > 0) {
+                ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
+                if (gameState === 'playing') screenShake *= 0.9;
+                if (screenShake < 0.5) screenShake = 0;
+            }
+
             // Set glowing blend mode
             ctx.globalCompositeOperation = 'lighter';
 
-            if (gameState === 'playing') {
+            if (gameState === 'playing' || gameState === 'cutscene') {
                 // Draw Player
                 ctx.save();
                 ctx.translate(player.x, player.y);
@@ -754,15 +896,37 @@
 
             // Reset blend mode
             ctx.globalCompositeOperation = 'source-over';
+
+            // Draw Cutscene Text
+            if (gameState === 'cutscene' && cutsceneText) {
+                ctx.fillStyle = '#0ff';
+                ctx.font = 'bold 40px Courier New';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#0ff';
+                
+                // Fade in and out
+                let alpha = 1;
+                if (cutsceneTimer > 100 && cutsceneType === 'boss_defeat') alpha = (120 - cutsceneTimer) / 20;
+                if (cutsceneTimer < 30) alpha = cutsceneTimer / 30;
+                
+                ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+                ctx.fillText(cutsceneText, width / 2, height / 3);
+                ctx.globalAlpha = 1;
+                ctx.shadowBlur = 0;
+            }
+
+            ctx.restore(); // Restore screen shake translation
         }
 
         function gameLoop() {
-            if (gameState === 'playing') {
+            if (gameState === 'playing' || gameState === 'cutscene') {
                 update();
             }
             draw();
             
-            if (gameState === 'playing' || particles.length > 0) {
+            if (gameState === 'playing' || gameState === 'cutscene' || particles.length > 0) {
                 requestAnimationFrame(gameLoop);
             }
         }
