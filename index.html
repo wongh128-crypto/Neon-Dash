@@ -152,6 +152,12 @@
         let bullets = []; 
         let bulletTimer = 0;
 
+        // --- Upgrade Variables ---
+        let shipTier = 0;
+        let nextUpgradeScore = 1000;
+        let upgradeFlashAlpha = 0;
+        let mothershipY = -200;
+
         // Setup Canvas
         function resize() {
             width = window.innerWidth;
@@ -213,6 +219,11 @@
             boss.active = false;
             boss.state = 'hidden';
             
+            shipTier = 0;
+            nextUpgradeScore = 1000;
+            upgradeFlashAlpha = 0;
+            mothershipY = -200;
+            
             gameState = 'cutscene';
             cutsceneType = 'intro';
             cutsceneTimer = 90;
@@ -273,8 +284,21 @@
                 y: player.y - player.size,
                 size: 5,
                 speedY: -12,
+                speedX: 0,
                 color: '#ff0'
             });
+            
+            if (shipTier >= 1) {
+                // Double shot streams alongside the main one
+                bullets.push({ x: player.x - 12, y: player.y - player.size + 5, size: 4, speedY: -12, speedX: 0, color: '#ff0' });
+                bullets.push({ x: player.x + 12, y: player.y - player.size + 5, size: 4, speedY: -12, speedX: 0, color: '#ff0' });
+            }
+            
+            if (shipTier >= 2) {
+                // Angled side cannons
+                bullets.push({ x: player.x - 20, y: player.y, size: 4, speedY: -10, speedX: -3, color: '#0f0' });
+                bullets.push({ x: player.x + 20, y: player.y, size: 4, speedY: -10, speedX: 3, color: '#0f0' });
+            }
         }
 
         function spawnBossProjectile() {
@@ -430,6 +454,42 @@
                         finalScore.innerText = Math.floor(score);
                         screenShake = 0;
                     }
+                } else if (cutsceneType === 'upgrade') {
+                    // Center player
+                    const ease = 0.1;
+                    player.x += (player.targetX - player.x) * ease;
+                    player.y += (player.targetY - player.y) * ease;
+                    
+                    // Sequence
+                    if (cutsceneTimer > 180) {
+                        // Mothership descends
+                        mothershipY += (100 - mothershipY) * 0.05;
+                    } else if (cutsceneTimer > 120) {
+                        // Beam infusion phase
+                        if (cutsceneTimer % 4 === 0) {
+                            createExplosion(player.x + (Math.random() - 0.5) * 20, player.y - 10, '#0ff', 2);
+                        }
+                    } else if (cutsceneTimer > 80) {
+                        // Flash builds up
+                        upgradeFlashAlpha = 1 - ((cutsceneTimer - 80) / 40);
+                        if (cutsceneTimer === 81) {
+                            shipTier++;
+                            nextUpgradeScore += 1000;
+                            createExplosion(player.x, player.y, '#fff', 150);
+                            cutsceneText = 'SHIP UPGRADED';
+                        }
+                    } else if (cutsceneTimer > 40) {
+                        // Flash fades
+                        upgradeFlashAlpha = (cutsceneTimer - 40) / 40;
+                    } else {
+                        // Mothership ascends
+                        mothershipY += (-300 - mothershipY) * 0.05;
+                        cutsceneText = '';
+                    }
+
+                    if (cutsceneTimer <= 0) {
+                        gameState = 'playing';
+                    }
                 }
                 return; // Skip the rest of the update loop
             }
@@ -455,8 +515,19 @@
                 if (frameCount % spawnRate === 0) spawnObstacle();
                 if (frameCount % 150 === 0) spawnCollectible();
                 
+                // Trigger Upgrade
+                if (score >= nextUpgradeScore) {
+                    gameState = 'cutscene';
+                    cutsceneType = 'upgrade';
+                    cutsceneTimer = 250; 
+                    cutsceneText = 'MOTHERSHIP INBOUND';
+                    player.targetX = width / 2;
+                    player.targetY = height / 1.5;
+                    mothershipY = -200;
+                    upgradeFlashAlpha = 0;
+                }
                 // Trigger Boss
-                if (score >= nextBossScore) {
+                else if (score >= nextBossScore) {
                     boss.active = true;
                     boss.state = 'entering';
                     boss.x = width / 2;
@@ -511,6 +582,7 @@
             for (let i = bullets.length - 1; i >= 0; i--) {
                 let b = bullets[i];
                 b.y += b.speedY;
+                b.x += b.speedX || 0;
                 
                 // Boss collision
                 if (boss.active && boss.state !== 'entering') {
@@ -727,7 +799,34 @@
                 ctx.shadowBlur = 20;
                 ctx.shadowColor = player.color;
                 ctx.beginPath();
-                ctx.arc(0, 0, player.size, 0, Math.PI * 2);
+                
+                if (shipTier === 0) {
+                    ctx.arc(0, 0, player.size, 0, Math.PI * 2);
+                } else if (shipTier === 1) {
+                    ctx.arc(0, 0, player.size, 0, Math.PI * 2);
+                    // Add swept wings
+                    ctx.moveTo(-player.size, 0);
+                    ctx.lineTo(-player.size * 2.5, player.size * 1.5);
+                    ctx.lineTo(-player.size * 0.5, -player.size * 0.8);
+                    ctx.moveTo(player.size, 0);
+                    ctx.lineTo(player.size * 2.5, player.size * 1.5);
+                    ctx.lineTo(player.size * 0.5, -player.size * 0.8);
+                } else {
+                    // Tier 2+ shape
+                    ctx.arc(0, 0, player.size, 0, Math.PI * 2);
+                    // Double wings
+                    ctx.moveTo(-player.size, 0);
+                    ctx.lineTo(-player.size * 3, player.size * 2);
+                    ctx.lineTo(-player.size * 0.8, -player.size * 1.2);
+                    ctx.moveTo(player.size, 0);
+                    ctx.lineTo(player.size * 3, player.size * 2);
+                    ctx.lineTo(player.size * 0.8, -player.size * 1.2);
+                    // Inner spikes
+                    ctx.moveTo(-player.size*1.5, player.size);
+                    ctx.lineTo(-player.size*2, -player.size*0.5);
+                    ctx.moveTo(player.size*1.5, player.size);
+                    ctx.lineTo(player.size*2, -player.size*0.5);
+                }
                 ctx.fill();
                 
                 // Player core
@@ -896,6 +995,57 @@
 
             // Reset blend mode
             ctx.globalCompositeOperation = 'source-over';
+
+            // Draw Mothership during upgrade cutscene
+            if (gameState === 'cutscene' && cutsceneType === 'upgrade') {
+                ctx.save();
+                ctx.translate(width / 2, mothershipY);
+                
+                // Infusion Beams (rendered behind mothership hull)
+                if (cutsceneTimer <= 180 && cutsceneTimer > 120) {
+                    ctx.fillStyle = `rgba(0, 255, 255, ${Math.random() * 0.6 + 0.2})`;
+                    ctx.beginPath();
+                    ctx.moveTo(-40, 40);
+                    ctx.lineTo(40, 40);
+                    ctx.lineTo(player.x - width / 2 + player.size * 2, player.y - mothershipY);
+                    ctx.lineTo(player.x - width / 2 - player.size * 2, player.y - mothershipY);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
+                // Mothership chassis
+                ctx.fillStyle = '#050515';
+                ctx.strokeStyle = '#0ff';
+                ctx.lineWidth = 4;
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = '#0ff';
+                
+                ctx.beginPath();
+                ctx.moveTo(-200, -80);
+                ctx.lineTo(200, -80);
+                ctx.lineTo(250, 0);
+                ctx.lineTo(150, 60);
+                ctx.lineTo(-150, 60);
+                ctx.lineTo(-250, 0);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                
+                // Core
+                ctx.fillStyle = '#fff';
+                ctx.shadowBlur = 50;
+                ctx.beginPath();
+                ctx.arc(0, 20, 30, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+
+            // Draw Upgrade Blinding Flash
+            if (upgradeFlashAlpha > 0) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, Math.min(1, upgradeFlashAlpha))})`;
+                ctx.fillRect(0, 0, width, height);
+            }
 
             // Draw Cutscene Text
             if (gameState === 'cutscene' && cutsceneText) {
