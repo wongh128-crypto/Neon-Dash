@@ -169,10 +169,10 @@
             </div>
         </div>
 
-        <div id="skinsScreen" class="screen hidden" style="width: 400px;">
+        <div id="skinsScreen" class="screen hidden" style="width: 450px;">
             <h1 style="color: #0ff; text-shadow: 0 0 15px #0ff; font-size: 36px;">ARMORY</h1>
             <p style="margin-bottom: 15px; font-size: 14px;">Equip a chassis. Every skin has a unique Special Ability.</p>
-            <div id="skinsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 350px; overflow-y: auto; margin-bottom: 20px; padding-right: 10px; text-align: left;">
+            <div id="skinsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto; margin-bottom: 20px; padding-right: 10px; text-align: left;">
             </div>
             <button id="backToMenuBtn">Back to Menu</button>
         </div>
@@ -224,28 +224,38 @@
         let nextUpgradeScore = 1000;
         let upgradeFlashAlpha = 0;
         let mothershipY = -200;
+        let postUpgradeInvincTimer = 0;
 
         // ABILITY VARIABLES
         let magentaShieldActive = false;
         let magentaNextThreshold = 1000;
         let limeCutscenePlayed = false;
         let solarCutscenePlayed = false;
-        let voidTimer = 180;
+        
+        let voidTimer = 360; 
         let voidCutscenePlayed = false;
+        let bossDisabledTimer = 0;
+        
         let bossKills = 0;
         let glitch67Active = false;
         let glitch67Timer = 0;
 
+        let alienShields = 0;
+        let alienMaxShields = 0;
+        let alienNextThreshold = 1000;
+
         let unlockedSkins = ['cyan'];
         let equippedSkin = 'cyan';
         let recentUnlock = null;
+        
         const skins = [
-            { id: 'cyan', color: '#0ff', name: 'Classic Cyan', req: 0, desc: 'Reliable. No special abilities.' },
-            { id: 'magenta', color: '#f0f', name: 'Neon Magenta', req: 500, desc: 'Purpur Shield: Blocks 1 lethal hit every 1000 pts.' },
+            { id: 'cyan', color: '#0ff', name: 'Classic Cyan', req: 0, desc: 'Reliable. Gets gun upgrades. Tier 5 unlocks Laser.' },
+            { id: 'magenta', color: '#f0f', name: 'Neon Magenta', req: 500, desc: 'Purpur Shield: Blocks 1 hit every 1000 pts.' },
             { id: 'lime', color: '#0f0', name: 'Lime Venom', req: 1000, desc: 'Decay Aura: Melts nearby boss projectiles.' },
             { id: 'gold', color: '#ffd700', name: 'Solar Flare', req: 1500, desc: 'Massive bullets, but your hitbox is increased.' },
-            { id: 'purple', color: '#8a2be2', name: 'Deep Void', req: 2000, desc: 'Singularity: Fires a piercing Black Hole every 3s.' },
+            { id: 'purple', color: '#8a2be2', name: 'Deep Void', req: 2000, desc: 'Singularity: Fire a massive Black Hole every 6s. Pulls red bricks in.' },
             { id: 'blood', color: '#ff0044', name: 'Blood Moon', req: 2500, desc: 'Rejuvenate: 20% chance to revive (+5% per boss kill).' },
+            { id: 'alien', color: '#7fff00', name: 'Alien Invader', req: 3000, desc: 'UFO Shield: Upgrades give shield charges instead of guns. +1 Charge/1000pts.' },
             { id: 'secret67', color: '#ff3300', name: 'Glitch 67', req: -1, desc: 'Anomaly: Die at boss? 67s invincible to kill & revive.' }
         ];
 
@@ -403,24 +413,31 @@
             bossLevel = 1;
             boss.active = false;
             boss.state = 'hidden';
+            bossDisabledTimer = 0;
             
             shipTier = 0;
             nextUpgradeScore = 1000;
             upgradeFlashAlpha = 0;
             mothershipY = -200;
+            postUpgradeInvincTimer = 0;
 
             // Reset Abilities
             magentaShieldActive = false;
             magentaNextThreshold = 1000;
+            
+            alienMaxShields = (equippedSkin === 'alien') ? 1 : 0;
+            alienShields = alienMaxShields;
+            alienNextThreshold = 1000;
+
             limeCutscenePlayed = false;
             solarCutscenePlayed = false;
-            voidTimer = 180;
+            voidTimer = 360; 
             voidCutscenePlayed = false;
             bossKills = 0;
             glitch67Active = false;
             glitch67Timer = 0;
 
-            player.size = (equippedSkin === 'gold') ? 25 : 15; // Solar Flare Hitbox
+            player.size = (equippedSkin === 'gold') ? 25 : 15; 
             
             gameState = 'cutscene';
             cutsceneType = 'intro';
@@ -436,10 +453,43 @@
             updateScore(0);
         }
 
-        // --- NEW CENTRALIZED DAMAGE HANDLER ---
-        function handlePlayerHit() {
-            if (glitch67Active) return; // Invincible during 67 mode
+        function checkBossDeath() {
+            if (boss.health <= 0 && boss.active) {
+                if (glitch67Active) {
+                    glitch67Active = false;
+                    timerDisplay.classList.add('hidden');
+                    gameState = 'cutscene';
+                    cutsceneType = 'glitch_success';
+                    cutsceneTimer = 120;
+                    cutsceneText = 'ANOMALY SURVIVED - REVIVING';
+                    bossKills++;
+                } else {
+                    gameState = 'cutscene';
+                    cutsceneType = 'boss_defeat';
+                    cutsceneTimer = 120;
+                    cutsceneText = 'TARGET DESTROYED';
+                }
+            }
+        }
 
+        function handlePlayerHit() {
+            if (glitch67Active) return; 
+            if (postUpgradeInvincTimer > 0) return;
+
+            // ALIEN UFO SHIELD
+            if (equippedSkin === 'alien' && alienShields > 0) {
+                alienShields--;
+                postUpgradeInvincTimer = 60; // 1 second invinc
+                createExplosion(player.x, player.y, '#7fff00', 40);
+                screenShake = 15;
+                showNotification('UFO SHIELD', `${alienShields} charges remaining`, '#7fff00');
+                
+                obstacles = obstacles.filter(o => { if(getDist(player, o) < 150) { createExplosion(o.x, o.y, '#7fff00', 3); return false; } return true; });
+                missiles = missiles.filter(m => { if(getDist(player, m) < 150) { createExplosion(m.x, m.y, '#7fff00', 3); return false; } return true; });
+                return;
+            }
+
+            // MAGENTA PURPUR SHIELD
             if (equippedSkin === 'magenta' && magentaShieldActive) {
                 magentaShieldActive = false;
                 gameState = 'cutscene';
@@ -447,23 +497,17 @@
                 cutsceneTimer = 60;
                 cutsceneText = 'PURPUR SHIELD DEPLOYED';
                 
-                // Blast away nearby enemies!
-                obstacles = obstacles.filter(o => {
-                    if (getDist(player, o) < 200) { createExplosion(o.x, o.y, '#f0f', 5); return false; }
-                    return true;
-                });
-                missiles = missiles.filter(m => {
-                    if (getDist(player, m) < 200) { createExplosion(m.x, m.y, '#f0f', 5); return false; }
-                    return true;
-                });
+                obstacles = obstacles.filter(o => { if (getDist(player, o) < 200) { createExplosion(o.x, o.y, '#f0f', 5); return false; } return true; });
+                missiles = missiles.filter(m => { if (getDist(player, m) < 200) { createExplosion(m.x, m.y, '#f0f', 5); return false; } return true; });
                 createExplosion(player.x, player.y, '#f0f', 80);
                 screenShake = 15;
                 return;
             }
 
+            // GLITCH 67 OVERRIDE
             if (equippedSkin === 'secret67' && boss.active && !glitch67Active) {
                 glitch67Active = true;
-                glitch67Timer = 67 * 60; // 67 Seconds at 60fps
+                glitch67Timer = 67 * 60; 
                 gameState = 'cutscene';
                 cutsceneType = 'glitch_start';
                 cutsceneTimer = 90;
@@ -474,6 +518,7 @@
                 return;
             }
 
+            // BLOOD MOON REVIVE
             if (equippedSkin === 'blood') {
                 let reviveChance = 0.20 + (bossKills * 0.05);
                 if (Math.random() < reviveChance) {
@@ -482,7 +527,7 @@
                     cutsceneTimer = 90;
                     cutsceneText = 'BLOOD MOON RISES';
                     
-                    obstacles = []; missiles = []; jets = []; bullets = [];
+                    obstacles = []; missiles = []; jets = []; bullets = []; bossDisabledTimer = 60;
                     player.x = width / 2; player.y = height / 1.5;
                     player.targetX = width / 2; player.targetY = height / 1.5;
                     createExplosion(player.x, player.y, '#ff0044', 150);
@@ -491,7 +536,6 @@
                 }
             }
 
-            // If no saves triggered, actual Game Over
             gameOver();
         }
 
@@ -511,12 +555,20 @@
             
             if (currentIntScore > highScore) highScore = currentIntScore;
             
-            // Check for Magenta Shield Proc
             if (equippedSkin === 'magenta' && currentIntScore >= magentaNextThreshold && !magentaShieldActive) {
                 magentaShieldActive = true;
                 magentaNextThreshold += 1000;
                 showNotification('ABILITY READY', 'Purpur Shield Online', '#f0f');
                 createExplosion(player.x, player.y, '#f0f', 20);
+            }
+
+            if (equippedSkin === 'alien' && currentIntScore >= alienNextThreshold) {
+                alienNextThreshold += 1000;
+                if (alienShields < alienMaxShields) {
+                    alienShields++;
+                    showNotification('SHIELD RECHARGED', `Charges: ${alienShields}/${alienMaxShields}`, '#7fff00');
+                    createExplosion(player.x, player.y, '#7fff00', 15);
+                }
             }
 
             let unlockedAny = false;
@@ -564,10 +616,13 @@
         function spawnBullet() {
             const bColor = player.color;
             const bText = equippedSkin === 'secret67' ? '67' : null;
-            let sizeMult = equippedSkin === 'gold' ? 3 : 1; // Solar Flare logic
+            let sizeMult = equippedSkin === 'gold' ? 3 : 1; 
             
             bullets.push({ x: player.x, y: player.y - player.size, size: 5 * sizeMult, speedY: -12, speedX: 0, color: bColor, text: bText });
             
+            // Alien skin replaces weapon upgrades with shields, so it ONLY shoots 1 bullet stream
+            if (equippedSkin === 'alien') return;
+
             if (shipTier >= 1) { 
                 bullets.push({ x: player.x - 12, y: player.y - player.size + 5, size: 4 * sizeMult, speedY: -12, speedX: 0, color: bColor, text: bText });
                 bullets.push({ x: player.x + 12, y: player.y - player.size + 5, size: 4 * sizeMult, speedY: -12, speedX: 0, color: bColor, text: bText });
@@ -587,8 +642,8 @@
         }
 
         function spawnBlackHole() {
-            const bhSize = 25 + (shipTier * 5); // Scale with upgrades
-            bullets.push({ x: player.x, y: player.y - player.size, size: bhSize, speedY: -4, speedX: 0, color: '#8a2be2', isBlackHole: true });
+            const bhSize = 35 + (shipTier * 5); 
+            bullets.push({ x: player.x, y: player.y - player.size, size: bhSize, speedY: -3, speedX: 0, color: '#8a2be2', isBlackHole: true, hasHitBoss: false });
             
             if (!voidCutscenePlayed) {
                 voidCutscenePlayed = true;
@@ -652,7 +707,7 @@
                 if (boss.active) boss.y -= 1; 
                 for (let i = bullets.length - 1; i >= 0; i--) {
                     let b = bullets[i]; b.y += b.speedY; b.x += b.speedX || 0;
-                    if (b.y < -50 || b.y > height + 50 || b.x < -50 || b.x > width + 50) bullets.splice(i, 1);
+                    if (b.y < -100 || b.y > height + 100 || b.x < -100 || b.x > width + 100) bullets.splice(i, 1);
                 }
                 for (let i = obstacles.length - 1; i >= 0; i--) {
                     let obs = obstacles[i]; obs.y += obs.speedY; obs.x += obs.speedX; obs.rotation += obs.rotationSpeed;
@@ -673,18 +728,19 @@
                 return;
             }
 
+            if (postUpgradeInvincTimer > 0) postUpgradeInvincTimer--;
+            if (bossDisabledTimer > 0) bossDisabledTimer--;
+
             // CUTSCENE LOGIC UPDATES
             if (gameState === 'cutscene') {
                 frameCount++;
                 cutsceneTimer--;
                 
-                // Allow player to move slightly during non-death cutscenes
                 if (['magenta_block', 'lime_decay', 'void_shot', 'solar_power'].includes(cutsceneType)) {
                     const ease = 0.15;
                     player.x += (player.targetX - player.x) * ease;
                     player.y += (player.targetY - player.y) * ease;
                     if (cutsceneTimer <= 0) gameState = 'playing';
-                    // Allow bullets to continue flying
                     for (let i = bullets.length - 1; i >= 0; i--) {
                         let b = bullets[i]; b.y += b.speedY; b.x += b.speedX || 0;
                     }
@@ -798,8 +854,20 @@
                         if (cutsceneTimer === 81) {
                             shipTier++;
                             nextUpgradeScore += 1000;
+                            
+                            if (equippedSkin === 'alien') {
+                                alienMaxShields = shipTier + 1;
+                                alienShields = alienMaxShields;
+                            }
+                            
                             createExplosion(player.x, player.y, '#fff', 150);
-                            cutsceneText = 'SHIP UPGRADED';
+                            if (equippedSkin === 'alien') {
+                                cutsceneText = 'UFO SHIELDS MAXIMIZED';
+                            } else if (shipTier === 5 && equippedSkin !== 'purple') {
+                                cutsceneText = 'LASER BEAM ONLINE';
+                            } else {
+                                cutsceneText = 'SHIP UPGRADED';
+                            }
                         }
                     } else if (cutsceneTimer > 40) {
                         upgradeFlashAlpha = (cutsceneTimer - 40) / 40;
@@ -807,12 +875,14 @@
                         mothershipY += (-300 - mothershipY) * 0.05;
                         cutsceneText = '';
                     }
-                    if (cutsceneTimer <= 0) gameState = 'playing';
+                    if (cutsceneTimer <= 0) {
+                        gameState = 'playing';
+                        postUpgradeInvincTimer = 180; // 3 SECONDS INVINCIBILITY
+                    }
                 }
                 return;
             }
 
-            // SOLAR FLARE INIT
             if (equippedSkin === 'gold' && !solarCutscenePlayed) {
                 solarCutscenePlayed = true;
                 gameState = 'cutscene';
@@ -822,7 +892,6 @@
                 return;
             }
 
-            // GLITCH 67 TIMER
             if (glitch67Active) {
                 glitch67Timer--;
                 timerDisplay.innerText = (glitch67Timer / 60).toFixed(2);
@@ -841,13 +910,50 @@
             player.x = Math.max(player.size, Math.min(width - player.size, player.x));
             player.y = Math.max(player.size, Math.min(height - player.size, player.y));
 
-            // LIME VENOM PASSIVE (Decay logic)
+            // TIER 5 LASER DAMAGE LOGIC (Runs every frame)
+            if (shipTier >= 5 && equippedSkin !== 'alien' && equippedSkin !== 'purple') {
+                const lx = player.x - 15;
+                const lw = 30;
+                const ly = 0;
+
+                if (frameCount % 2 === 0) createExplosion(player.x + (Math.random()-0.5)*30, player.y - Math.random()*height, player.color, 1);
+
+                if (boss.active && boss.state !== 'entering') {
+                    if (boss.x + boss.size > lx && boss.x - boss.size < lx + lw && boss.y > ly && boss.y - boss.size < player.y) {
+                        boss.health -= 8; // Continuous laser burn
+                        createExplosion(boss.x + (Math.random()-0.5)*boss.size, boss.y + boss.size, '#ff0', 2);
+                        checkBossDeath();
+                    }
+                }
+                
+                for (let i = jets.length - 1; i >= 0; i--) {
+                    let j = jets[i];
+                    if (j.x + j.size > lx && j.x - j.size < lx + lw) {
+                        j.health -= 8;
+                        createExplosion(j.x, j.y, '#ff0', 2);
+                        if (j.health <= 0) {
+                            createExplosion(j.x, j.y, j.color, 20);
+                            updateScore(50);
+                            jets.splice(i, 1);
+                        }
+                    }
+                }
+                
+                for (let i = missiles.length - 1; i >= 0; i--) {
+                    let m = missiles[i];
+                    if (m.x + m.size > lx && m.x - m.size < lx + lw) {
+                        createExplosion(m.x, m.y, m.color, 15); 
+                        missiles.splice(i, 1);
+                    }
+                }
+            }
+
             if (equippedSkin === 'lime' && boss.active) {
                 for (let i = obstacles.length - 1; i >= 0; i--) {
                     let obs = obstacles[i];
                     if (obs.color === '#f0f' && getDist(player, obs) < 220) {
-                        obs.size -= 0.6; // Decay the projectile!
-                        createExplosion(obs.x, obs.y, '#0f0', 1); // Green poison particle
+                        obs.size -= 0.6; 
+                        createExplosion(obs.x, obs.y, '#0f0', 1); 
                         if (obs.size < 3) {
                             obstacles.splice(i, 1);
                             createExplosion(obs.x, obs.y, '#0f0', 10);
@@ -888,32 +994,37 @@
                     boss.y += 2;
                     if (boss.y >= 100) boss.state = 'fighting';
                 } else if (boss.state === 'fighting') {
-                    boss.x += boss.speedX;
-                    if (boss.x <= boss.size || boss.x >= width - boss.size) boss.speedX *= -1;
                     
-                    boss.fireTimer++;
-                    let bossFireRate = Math.max(10, 40 - (bossLevel * 5)); 
-                    if (boss.fireTimer >= bossFireRate) {
-                        spawnBossProjectile();
-                        boss.fireTimer = 0;
-                    }
+                    if (bossDisabledTimer > 0) {
+                        // Boss is stunned! Shakes slightly but can't shoot or move much.
+                        boss.x += (Math.random() - 0.5) * 5;
+                    } else {
+                        boss.x += boss.speedX;
+                        if (boss.x <= boss.size || boss.x >= width - boss.size) boss.speedX *= -1;
+                        
+                        boss.fireTimer++;
+                        let bossFireRate = Math.max(10, 40 - (bossLevel * 5)); 
+                        if (boss.fireTimer >= bossFireRate) {
+                            spawnBossProjectile();
+                            boss.fireTimer = 0;
+                        }
 
-                    boss.jetTimer++;
-                    let jetSpawnRate = Math.max(60, 150 - (bossLevel * 10));
-                    if (boss.jetTimer >= jetSpawnRate) {
-                        spawnJet();
-                        boss.jetTimer = 0;
+                        boss.jetTimer++;
+                        let jetSpawnRate = Math.max(60, 150 - (bossLevel * 10));
+                        if (boss.jetTimer >= jetSpawnRate) {
+                            spawnJet();
+                            boss.jetTimer = 0;
+                        }
                     }
                 }
                 
-                // DEEP VOID LOGIC VS NORMAL SHOOTING
                 if (equippedSkin === 'purple') {
                     voidTimer++;
-                    if (voidTimer >= 180) { // 3 seconds
+                    if (voidTimer >= 360) { // 6 Seconds
                         spawnBlackHole();
                         voidTimer = 0;
                     }
-                } else {
+                } else if (shipTier < 5 || equippedSkin === 'alien') {
                     bulletTimer++;
                     if (bulletTimer >= 8) {
                         spawnBullet();
@@ -930,34 +1041,46 @@
                 b.y += b.speedY; b.x += b.speedX || 0;
                 
                 if (boss.active && boss.state !== 'entering') {
+                    
+                    // DEEP VOID GRAVITY SUCK ON BOSS
+                    if (b.isBlackHole) {
+                        const dx = b.x - boss.x;
+                        const dy = b.y - boss.y;
+                        boss.x += dx * 0.05;
+                        boss.y += dy * 0.05;
+                    }
+
                     const dist = getDist(b, boss);
                     if (dist < boss.size * 0.8 + b.size) {
-                        // Black holes pierce and deal damage per frame touching
-                        boss.health -= b.isBlackHole ? 4 : 10; 
-                        createExplosion(b.x, b.y - b.size, b.color, b.isBlackHole ? 1 : 3);
-                        
-                        if (!b.isBlackHole) bullets.splice(i, 1);
-                        
-                        if (boss.health <= 0) {
-                            if (glitch67Active) {
-                                glitch67Active = false;
-                                timerDisplay.classList.add('hidden');
-                                gameState = 'cutscene';
-                                cutsceneType = 'glitch_success';
-                                cutsceneTimer = 120;
-                                cutsceneText = 'ANOMALY SURVIVED - REVIVING';
-                                bossKills++;
+                        if (b.isBlackHole) {
+                            if (!b.hasHitBoss) {
+                                b.hasHitBoss = true;
+                                boss.health -= boss.maxHealth * 0.25; // 25% CHUNK!
+                                bossDisabledTimer = 180; // DISABLE ABILITIES 3s
+                                
+                                createExplosion(boss.x, boss.y, '#8a2be2', 100);
+                                showNotification('VOID BURST', 'Boss Systems Disabled', '#8a2be2');
+                                screenShake = 15;
+                                
+                                // Wipe Jets & Missiles
+                                for(let j = 0; j < jets.length; j++) createExplosion(jets[j].x, jets[j].y, jets[j].color, 20);
+                                jets = [];
+                                for(let m = 0; m < missiles.length; m++) createExplosion(missiles[m].x, missiles[m].y, missiles[m].color, 10);
+                                missiles = [];
                             } else {
-                                gameState = 'cutscene';
-                                cutsceneType = 'boss_defeat';
-                                cutsceneTimer = 120;
-                                cutsceneText = 'TARGET DESTROYED';
+                                boss.health -= 2; // minor tick damage if it lingers
                             }
+                        } else {
+                            boss.health -= 10;
+                            bullets.splice(i, 1);
                         }
+                        
+                        createExplosion(b.x, b.y - b.size, b.color, b.isBlackHole ? 2 : 3);
+                        checkBossDeath();
                         continue;
                     }
                 }
-                if (b.y < -30) bullets.splice(i, 1);
+                if (b.y < -100) bullets.splice(i, 1);
             }
 
             // JETS UPDATE
@@ -1002,9 +1125,7 @@
 
                 m.x += m.vx; m.y += m.vy;
 
-                if (frameCount % 3 === 0) {
-                    particles.push({ x: m.x, y: m.y, vx: 0, vy: 0, size: 2, color: m.color, life: 0.5, decay: 0.05 });
-                }
+                if (frameCount % 3 === 0) particles.push({ x: m.x, y: m.y, vx: 0, vy: 0, size: 2, color: m.color, life: 0.5, decay: 0.05 });
 
                 let missileDestroyed = false;
                 for (let k = bullets.length - 1; k >= 0; k--) {
@@ -1033,6 +1154,18 @@
             // OBSTACLES UPDATE
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let obs = obstacles[i];
+                
+                // PURPLE BLACK HOLE PASSIVE GRAVITY PULL
+                if (equippedSkin === 'purple') {
+                    const dx = player.x - obs.x;
+                    const dy = player.y - obs.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist > 0) {
+                        obs.x += (dx / dist) * 0.8;
+                        obs.y += (dy / dist) * 0.8;
+                    }
+                }
+                
                 obs.y += obs.speedY; obs.x += obs.speedX; obs.rotation += obs.rotationSpeed;
 
                 if (getDist(player, obs) < player.size + (obs.size * 0.8)) {
@@ -1060,7 +1193,6 @@
         }
 
         function draw() {
-            // Screen Flash logic for Glitch 67
             if (glitch67Active) {
                 ctx.fillStyle = `rgba(255, 0, 0, ${0.1 + Math.sin(frameCount * 0.1) * 0.05})`;
             } else {
@@ -1077,22 +1209,51 @@
 
             ctx.globalCompositeOperation = 'lighter';
 
+            // DRAW TIER 5 LASER
+            if (shipTier >= 5 && equippedSkin !== 'alien' && equippedSkin !== 'purple' && (gameState === 'playing' || gameState === 'cutscene')) {
+                ctx.save();
+                ctx.fillStyle = player.color;
+                ctx.globalAlpha = 0.5 + Math.random() * 0.5;
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = player.color;
+                ctx.fillRect(player.x - 15, 0, 30, player.y);
+                ctx.fillStyle = '#fff';
+                ctx.globalAlpha = 0.9;
+                ctx.shadowBlur = 10;
+                ctx.fillRect(player.x - 5, 0, 10, player.y);
+                ctx.restore();
+            }
+
             if (gameState === 'playing' || gameState === 'cutscene') {
                 if (cutsceneType !== 'secret_unlock') {
                     ctx.save();
                     ctx.translate(player.x, player.y);
                     
-                    // MAGENTA SHIELD RENDER
                     if (magentaShieldActive) {
                         ctx.beginPath();
                         ctx.arc(0, 0, player.size + 15 + Math.sin(frameCount * 0.1) * 5, 0, Math.PI * 2);
-                        ctx.strokeStyle = '#f0f'; ctx.lineWidth = 3;
-                        ctx.shadowBlur = 15; ctx.shadowColor = '#f0f';
-                        ctx.stroke();
-                        ctx.fillStyle = 'rgba(255, 0, 255, 0.1)'; ctx.fill();
+                        ctx.strokeStyle = '#f0f'; ctx.lineWidth = 3; ctx.shadowBlur = 15; ctx.shadowColor = '#f0f';
+                        ctx.stroke(); ctx.fillStyle = 'rgba(255, 0, 255, 0.1)'; ctx.fill();
                     }
 
-                    // GLITCH 67 INVINCIBILITY RENDER
+                    if (equippedSkin === 'alien' && alienShields > 0) {
+                        for(let i = 0; i < alienShields; i++) {
+                            const angle = (frameCount * 0.05) + (i * (Math.PI * 2 / alienShields));
+                            const orbitRadius = player.size + 20;
+                            const sx = Math.cos(angle) * orbitRadius;
+                            const sy = Math.sin(angle) * orbitRadius;
+                            
+                            ctx.fillStyle = '#7fff00'; ctx.shadowBlur = 15; ctx.shadowColor = '#7fff00';
+                            ctx.beginPath(); ctx.arc(sx, sy, 6, 0, Math.PI * 2); ctx.fill();
+                        }
+                    }
+
+                    if (postUpgradeInvincTimer > 0) {
+                        ctx.beginPath(); ctx.arc(0, 0, player.size + 25, 0, Math.PI * 2);
+                        ctx.strokeStyle = `rgba(0, 255, 255, ${Math.sin(frameCount * 0.2) * 0.5 + 0.5})`; 
+                        ctx.lineWidth = 4; ctx.shadowBlur = 10; ctx.shadowColor = '#0ff'; ctx.stroke();
+                    }
+
                     if (glitch67Active) {
                         ctx.shadowColor = '#ff3300';
                         if (frameCount % 4 < 2) ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5);
@@ -1100,13 +1261,9 @@
                         ctx.shadowColor = player.color;
                     }
 
-                    ctx.fillStyle = player.color;
-                    ctx.strokeStyle = player.color;
-                    ctx.lineWidth = 2;
-                    ctx.shadowBlur = 20;
-                    ctx.beginPath();
+                    ctx.fillStyle = player.color; ctx.strokeStyle = player.color; ctx.lineWidth = 2; ctx.shadowBlur = 20; ctx.beginPath();
                     
-                    if (shipTier === 0) {
+                    if (shipTier === 0 || equippedSkin === 'alien') {
                         ctx.arc(0, 0, player.size, 0, Math.PI * 2);
                     } else if (shipTier === 1) {
                         ctx.arc(0, 0, player.size, 0, Math.PI * 2);
@@ -1124,22 +1281,17 @@
                         ctx.moveTo(player.size, 0); ctx.lineTo(player.size * 3, player.size * 2); ctx.lineTo(player.size * 0.8, -player.size * 1.2);
                         ctx.moveTo(-player.size*1.5, player.size); ctx.lineTo(-player.size*2, -player.size*0.5);
                         ctx.moveTo(player.size*1.5, player.size); ctx.lineTo(player.size*2, -player.size*0.5);
-                        ctx.moveTo(player.size * 2.5, 0); ctx.arc(0, 0, player.size * 2.5, 0, Math.PI * 2);
-                        ctx.stroke();
+                        ctx.moveTo(player.size * 2.5, 0); ctx.arc(0, 0, player.size * 2.5, 0, Math.PI * 2); ctx.stroke();
                     } else {
                         for (let i = 0; i < 8; i++) {
                             ctx.rotate(Math.PI / 4);
-                            ctx.moveTo(0, 0); ctx.lineTo(0, -player.size * 2.5);
-                            ctx.lineTo(player.size, -player.size);
+                            ctx.moveTo(0, 0); ctx.lineTo(0, -player.size * 2.5); ctx.lineTo(player.size, -player.size);
                         }
                     }
                     ctx.fill();
                     
-                    ctx.fillStyle = '#fff';
-                    ctx.shadowBlur = 0;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, player.size * 0.4, 0, Math.PI * 2);
-                    ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.shadowBlur = 0; ctx.beginPath();
+                    ctx.arc(0, 0, player.size * 0.4, 0, Math.PI * 2); ctx.fill();
                     ctx.restore();
                 }
             }
@@ -1158,6 +1310,10 @@
                     ctx.fillStyle = '#000'; ctx.fill();
                     ctx.lineWidth = 3; ctx.strokeStyle = '#8a2be2'; ctx.stroke();
                     ctx.shadowBlur = 20; ctx.beginPath(); ctx.arc(b.x, b.y, b.size + Math.sin(frameCount * 0.2)*5, 0, Math.PI * 2); ctx.stroke();
+                    
+                    // Inner swirl
+                    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath();
+                    ctx.arc(b.x, b.y, b.size * 0.5, frameCount * 0.1, frameCount * 0.1 + Math.PI); ctx.stroke();
                 } else {
                     ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2); ctx.fill();
                 }
@@ -1167,8 +1323,11 @@
             if (boss.active) {
                 ctx.save();
                 ctx.translate(boss.x, boss.y);
-                ctx.fillStyle = boss.color;
-                ctx.shadowBlur = 30; ctx.shadowColor = boss.color;
+                if (bossDisabledTimer > 0 && frameCount % 2 === 0) ctx.translate((Math.random()-0.5)*10, (Math.random()-0.5)*10);
+
+                ctx.fillStyle = bossDisabledTimer > 0 ? '#555' : boss.color;
+                ctx.shadowBlur = bossDisabledTimer > 0 ? 0 : 30; 
+                ctx.shadowColor = boss.color;
                 ctx.beginPath();
                 ctx.moveTo(0, -boss.size); ctx.lineTo(boss.size, 0); ctx.lineTo(0, boss.size); ctx.lineTo(-boss.size, 0);
                 ctx.closePath(); ctx.fill();
@@ -1177,6 +1336,12 @@
                 ctx.moveTo(0, -boss.size * 0.5); ctx.lineTo(boss.size * 0.5, 0); ctx.lineTo(0, boss.size * 0.5); ctx.lineTo(-boss.size * 0.5, 0);
                 ctx.closePath(); ctx.fill();
                 
+                if (bossDisabledTimer > 0) {
+                    ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(-boss.size, -boss.size); ctx.lineTo(boss.size, boss.size); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(boss.size, -boss.size); ctx.lineTo(-boss.size, boss.size); ctx.stroke();
+                }
+
                 if (boss.state === 'fighting') {
                     ctx.fillStyle = '#f00'; ctx.fillRect(-boss.size, -boss.size - 20, boss.size * 2, 8);
                     ctx.fillStyle = '#0f0'; const hpPercent = Math.max(0, boss.health / boss.maxHealth);
