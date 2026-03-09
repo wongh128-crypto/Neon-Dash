@@ -158,7 +158,19 @@
     <div id="timer-display" class="hidden">67.00</div>
     
     <div id="multiplayer-status" style="position: absolute; top: 10px; right: 10px; color: #ffaa00; font-size: 14px; z-index: 100; text-shadow: 0 0 5px #ffaa00; pointer-events: none;">
-        Connecting to Network...
+        Offline
+    </div>
+
+    <div id="peerjs-ui" style="position: absolute; top: 40px; right: 10px; background: rgba(0,0,0,0.8); padding: 15px; border: 2px solid #0ff; border-radius: 10px; color: white; font-family: Courier New; z-index: 100;">
+        <h3 style="margin-top: 0; color: #0ff;">Multiplayer</h3>
+        <button id="host-btn" style="background: #0ff; color: #000; padding: 5px 10px; border: none; cursor: pointer; font-weight: bold; margin-bottom: 10px;">Host a Game</button>
+        <div id="host-info" style="display: none; margin-bottom: 10px;">
+            Room ID: <br><span id="room-id-display" style="color: #0f0; font-weight: bold; user-select: all; font-size: 12px; word-break: break-all;">Loading...</span>
+        </div>
+        <hr style="border-color: #333;">
+        <input type="text" id="join-id" placeholder="Enter Room ID" style="padding: 5px; width: 140px; background: #222; color: #0ff; border: 1px solid #0ff; margin-bottom: 5px;">
+        <br>
+        <button id="join-btn" style="background: #f0f; color: #fff; padding: 5px 10px; border: none; cursor: pointer; font-weight: bold; width: 100%;">Join</button>
     </div>
 
     <div id="notificationArea"></div>
@@ -190,11 +202,8 @@
 
     <canvas id="gameCanvas"></canvas>
 
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const startScreen = document.getElementById('startScreen');
@@ -248,79 +257,152 @@
         let glitch67Active = false;
         let glitch67Timer = 0;
 
-        let currentUser = null;
         let otherPlayers = {};
+        let isHost = false;
+        let peer = null;
+        let hostConnection = null;
+        let clientConnections = []; // For the host to track connected friends
 
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const statusEl = document.getElementById('multiplayer-status');
+        const hostBtn = document.getElementById('host-btn');
+        const joinBtn = document.getElementById('join-btn');
+        const joinInput = document.getElementById('join-id');
+        const hostInfo = document.getElementById('host-info');
+        const roomIdDisplay = document.getElementById('room-id-display');
 
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (e) {
-                console.error("Auth error", e);
-            }
-        };
-        initAuth();
+        // Setup PeerJS Networking
+        function initPeer() {
+            peer = new Peer(); 
+            
+            peer.on('open', (id) => {
+                console.log('Ready! My ID is: ' + id);
+            });
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            const statusEl = document.getElementById('multiplayer-status');
-            if (user) {
-                statusEl.innerText = "Shared World: Online";
-                statusEl.style.color = "#0f0";
-                statusEl.style.textShadow = "0 0 5px #0f0";
+            peer.on('connection', (conn) => {
+                if (!isHost) return; // Only the host accepts incoming connections
                 
-                const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players');
-                onSnapshot(playersRef, (snapshot) => {
-                    const now = Date.now();
-                    snapshot.forEach(docSnap => {
-                        if (docSnap.id !== currentUser.uid) {
-                            const data = docSnap.data();
-                            // Only show players updated recently (within 10 seconds)
-                            if (now - data.lastUpdate < 10000) {
-                                if (!otherPlayers[docSnap.id]) {
-                                    otherPlayers[docSnap.id] = { ...data, displayX: data.x, displayY: data.y };
-                                } else {
-                                    otherPlayers[docSnap.id].targetX = data.x;
-                                    otherPlayers[docSnap.id].targetY = data.y;
-                                    otherPlayers[docSnap.id].score = data.score;
-                                    otherPlayers[docSnap.id].skin = data.skin;
-                                    otherPlayers[docSnap.id].lastUpdate = data.lastUpdate;
-                                }
-                            }
-                        }
-                    });
-                }, (error) => {
-                    console.error("Snapshot error:", error);
+                statusEl.innerText = "Players Joined!";
+                statusEl.style.color = "#0f0";
+                clientConnections.push(conn);
+                
+                conn.on('data', (data) => {
+                    if (data.type === 'playerUpdate') {
+                        otherPlayers[conn.peer] = { ...data.playerData, lastUpdate: Date.now() };
+                    }
                 });
+
+                conn.on('close', () => {
+                    delete otherPlayers[conn.peer];
+                    clientConnections = clientConnections.filter(c => c !== conn);
+                });
+            });
+        }
+
+        hostBtn.addEventListener('click', () => {
+            if (!peer) initPeer();
+            isHost = true;
+            hostInfo.style.display = 'block';
+            statusEl.innerText = "Hosting Game...";
+            statusEl.style.color = "#0ff";
+            
+            const showId = (id) => {
+                roomIdDisplay.innerText = id;
+                roomIdDisplay.style.cursor = "pointer";
+                roomIdDisplay.title = "Click to copy";
+                // Click to copy the ID
+                roomIdDisplay.onclick = () => {
+                    const tempInput = document.createElement("input");
+                    tempInput.value = id;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(tempInput);
+                    
+                    const originalColor = roomIdDisplay.style.color;
+                    roomIdDisplay.style.color = "#fff";
+                    setTimeout(() => roomIdDisplay.style.color = originalColor, 200);
+                };
+            };
+
+            if (peer.id) {
+                showId(peer.id);
             } else {
-                statusEl.innerText = "Network Offline";
-                statusEl.style.color = "#f00";
-                statusEl.style.textShadow = "0 0 5px #f00";
+                peer.on('open', showId);
             }
         });
 
-        // Sync player position to the shared world every 300ms
-        setInterval(() => {
-            if (currentUser && gameState === 'playing') {
-                const playerRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid);
-                setDoc(playerRef, {
-                    x: player.x,
-                    y: player.y,
-                    skin: equippedSkin,
-                    score: Math.floor(score),
-                    lastUpdate: Date.now()
-                }).catch(e => console.error("Update error:", e));
+        joinBtn.addEventListener('click', () => {
+            const roomToJoin = joinInput.value.trim();
+            if (!roomToJoin) return;
+            
+            if (!peer) initPeer();
+            isHost = false;
+            
+            statusEl.innerText = "Connecting...";
+            statusEl.style.color = "#ffaa00";
+
+            const connectToHost = () => {
+                hostConnection = peer.connect(roomToJoin);
+                
+                hostConnection.on('open', () => {
+                    statusEl.innerText = "Connected to Host!";
+                    statusEl.style.color = "#0f0";
+                    document.getElementById('peerjs-ui').style.display = 'none'; // Hide menu to clean up screen
+                });
+
+                hostConnection.on('data', (data) => {
+                    if (data.type === 'worldState') {
+                        const now = Date.now();
+                        for (let id in data.state) {
+                            if (id === peer.id) continue; // Don't draw ourselves twice
+                            
+                            const pData = data.state[id];
+                            if (!otherPlayers[id]) {
+                                otherPlayers[id] = { ...pData, displayX: pData.x, displayY: pData.y };
+                            } else {
+                                otherPlayers[id].targetX = pData.x;
+                                otherPlayers[id].targetY = pData.y;
+                                otherPlayers[id].score = pData.score;
+                                otherPlayers[id].skin = pData.skin;
+                                otherPlayers[id].lastUpdate = now;
+                            }
+                        }
+                    }
+                });
+
+                hostConnection.on('close', () => {
+                    statusEl.innerText = "Disconnected";
+                    statusEl.style.color = "#f00";
+                    otherPlayers = {}; 
+                    document.getElementById('peerjs-ui').style.display = 'block'; // Show menu again
+                });
+            };
+
+            if (peer.id) {
+                connectToHost();
+            } else {
+                peer.on('open', connectToHost);
             }
-        }, 300);
+        });
+
+        // Sync positions rapidly (10 times a second)
+        setInterval(() => {
+            if (gameState === 'playing') {
+                const myData = { x: player.x, y: player.y, skin: equippedSkin, score: Math.floor(score) };
+                
+                if (isHost) {
+                    // Host packages all players (including itself) and sends to everyone
+                    let allPlayersData = { ...otherPlayers };
+                    allPlayersData[peer.id] = { ...myData, lastUpdate: Date.now() };
+                    clientConnections.forEach(c => {
+                        if (c.open) c.send({ type: 'worldState', state: allPlayersData });
+                    });
+                } else if (hostConnection && hostConnection.open) {
+                    // Client just sends its own data to the host
+                    hostConnection.send({ type: 'playerUpdate', playerData: myData });
+                }
+            }
+        }, 100);
 
         let alienShields = 0;
         let alienMaxShields = 0;
