@@ -257,6 +257,11 @@
         let glitch67Active = false;
         let glitch67Timer = 0;
 
+        let hasMoved = false;
+        let koalaNapActive = false;
+        let koalaNapTimer = 0;
+        let koalaUsed = false;
+
         let otherPlayers = {};
         let isHost = false;
         let peer = null;
@@ -434,6 +439,7 @@
             { id: 'purple', color: '#8a2be2', name: 'Deep Void', req: 2000, desc: 'Singularity: Fire a massive Black Hole every 6s. Pulls red bricks in.' },
             { id: 'blood', color: '#ff0044', name: 'Blood Moon', req: 2500, desc: 'Rejuvenate: 20% chance to revive (+5% per boss kill).' },
             { id: 'alien', color: '#7fff00', name: 'Alien Invader', req: 3000, desc: 'UFO Shield: Upgrades give shield charges instead of guns. +1 Charge/1000pts.' },
+            { id: 'koala', color: '#a9a9a9', name: 'KOALASEATME', req: -1, desc: 'Take a nap: Fatal damage freezes movement & grants 100s invincibility (Once per run).' },
             { id: 'secret67', color: '#ff3300', name: 'Glitch 67', req: -1, desc: 'Anomaly: Die at boss? 67s invincible to kill & revive.' }
         ];
 
@@ -459,7 +465,8 @@
         }
 
         function updateTarget(e) {
-            if (gameState !== 'playing' && !(gameState === 'cutscene' && (cutsceneType === 'boss_defeat' || cutsceneType === 'skin_unlock' || cutsceneType === 'magenta_block' || cutsceneType === 'lime_decay' || cutsceneType === 'void_shot' || cutsceneType === 'solar_power'))) return;
+            if (gameState !== 'playing' && !(gameState === 'cutscene' && (cutsceneType === 'boss_defeat' || cutsceneType === 'skin_unlock' || cutsceneType === 'magenta_block' || cutsceneType === 'lime_decay' || cutsceneType === 'void_shot' || cutsceneType === 'solar_power' || cutsceneType === 'alien_shield' || cutsceneType === 'koala_wake'))) return;
+            if (koalaNapActive) return; // Prevent movement targeting while sleeping
             
             let clientX, clientY;
             if (e.touches && e.touches.length > 0) {
@@ -541,7 +548,7 @@
                             ${isUnlocked || s.req !== -1 ? s.name : '???'}
                         </div>
                         <div style="font-size: 11px; color: ${isUnlocked ? '#ccc' : '#444'}; margin-top: 4px; line-height: 1.2;">
-                            ${isUnlocked && s.req === -1 ? 'Anomaly Acquired: Glitch 67 mode available.' : s.desc}
+                            ${isUnlocked && s.req === -1 ? `Secret Unlocked: ${s.desc}` : s.desc}
                         </div>
                     </div>
                     <div>${btnHtml}</div>
@@ -615,6 +622,11 @@
             glitch67Active = false;
             glitch67Timer = 0;
 
+            hasMoved = false;
+            koalaNapActive = false;
+            koalaNapTimer = 0;
+            koalaUsed = false;
+
             player.size = (equippedSkin === 'gold') ? 25 : 15; 
             
             gameState = 'cutscene';
@@ -664,6 +676,27 @@
                 
                 obstacles = obstacles.filter(o => { if(getDist(player, o) < 150) { createExplosion(o.x, o.y, '#7fff00', 3); return false; } return true; });
                 missiles = missiles.filter(m => { if(getDist(player, m) < 150) { createExplosion(m.x, m.y, '#7fff00', 3); return false; } return true; });
+                
+                gameState = 'cutscene';
+                cutsceneType = 'alien_shield';
+                cutsceneTimer = 60;
+                cutsceneText = 'UFO SHIELD DEPLOYED';
+                return;
+            }
+
+            // KOALA NAP ABILITY
+            if (equippedSkin === 'koala' && !koalaUsed) {
+                koalaUsed = true;
+                koalaNapActive = true;
+                koalaNapTimer = 100 * 60; // 100 seconds
+                gameState = 'cutscene';
+                cutsceneType = 'koala_nap';
+                cutsceneTimer = 60;
+                cutsceneText = 'TAKING A NAP...';
+                createExplosion(player.x, player.y, '#a9a9a9', 50);
+                timerDisplay.classList.remove('hidden');
+                screenShake = 10;
+                obstacles = []; missiles = []; jets = []; bullets = [];
                 return;
             }
 
@@ -914,10 +947,12 @@
                 frameCount++;
                 cutsceneTimer--;
                 
-                if (['magenta_block', 'lime_decay', 'void_shot', 'solar_power'].includes(cutsceneType)) {
+                if (['magenta_block', 'lime_decay', 'void_shot', 'solar_power', 'alien_shield', 'koala_nap', 'koala_wake'].includes(cutsceneType)) {
                     const ease = 0.15;
-                    player.x += (player.targetX - player.x) * ease;
-                    player.y += (player.targetY - player.y) * ease;
+                    if (!koalaNapActive) { // Don't move if napping
+                        player.x += (player.targetX - player.x) * ease;
+                        player.y += (player.targetY - player.y) * ease;
+                    }
                     if (cutsceneTimer <= 0) gameState = 'playing';
                     for (let i = bullets.length - 1; i >= 0; i--) {
                         let b = bullets[i]; b.y += b.speedY; b.x += b.speedX || 0;
@@ -986,7 +1021,15 @@
 
                     if (cutsceneTimer <= 0) {
                         const finalIntScore = Math.floor(score);
-                        if (finalIntScore === 67 && !unlockedSkins.includes('secret67')) {
+                        if (!hasMoved && !unlockedSkins.includes('koala')) {
+                            unlockedSkins.push('koala');
+                            recentUnlock = skins.find(s => s.id === 'koala');
+                            gameState = 'cutscene';
+                            cutsceneType = 'koala_unlock';
+                            cutsceneTimer = 180;
+                            cutsceneText = 'LAZINESS REWARDED';
+                            createExplosion(player.x, player.y, '#a9a9a9', 100); 
+                        } else if (finalIntScore === 67 && !unlockedSkins.includes('secret67')) {
                             unlockedSkins.push('secret67');
                             recentUnlock = skins.find(s => s.id === 'secret67');
                             gameState = 'cutscene';
@@ -1017,6 +1060,22 @@
                         finalScore.innerText = Math.floor(score);
                         screenShake = 0;
                         showNotification('SECRET UNLOCKED', 'Glitch 67', '#ff3300');
+                    }
+                } else if (cutsceneType === 'koala_unlock') {
+                    screenShake = 5;
+                    if (cutsceneTimer === 120) cutsceneText = 'A LAZY ONE, ARENT YOU?';
+                    if (cutsceneTimer === 60) cutsceneText = 'KOALASEATME ACQUIRED';
+                    if (cutsceneTimer % 2 === 0) {
+                        createExplosion(Math.random() * width, Math.random() * height, '#a9a9a9', 1);
+                        createExplosion(Math.random() * width, Math.random() * height, '#fff', 1);
+                    }
+                    if (cutsceneTimer <= 0) {
+                        gameState = 'gameover';
+                        gameOverScreen.classList.remove('hidden');
+                        document.getElementById('gameOverTitle').innerText = 'NAP TIME OVER';
+                        finalScore.innerText = Math.floor(score);
+                        screenShake = 0;
+                        showNotification('SECRET UNLOCKED', 'KOALASEATME', '#a9a9a9');
                     }
                 } else if (cutsceneType === 'upgrade') {
                     const ease = 0.1;
@@ -1077,6 +1136,26 @@
                     glitch67Active = false;
                     gameOver();
                 }
+            }
+
+            if (koalaNapActive) {
+                koalaNapTimer--;
+                timerDisplay.innerText = (koalaNapTimer / 60).toFixed(2);
+                player.targetX = player.x; // Force position
+                player.targetY = player.y;
+                if (koalaNapTimer <= 0) {
+                    koalaNapActive = false;
+                    timerDisplay.classList.add('hidden');
+                    gameState = 'cutscene';
+                    cutsceneType = 'koala_wake';
+                    cutsceneTimer = 60;
+                    cutsceneText = 'WIDE AWAKE';
+                    postUpgradeInvincTimer = 180; // Waking up gives 3s invincibility
+                }
+            }
+
+            if (!hasMoved && gameState === 'playing' && getDist(player, {x: width/2, y: height/1.5}) > 10) {
+                hasMoved = true;
             }
 
             // Animate other players smoothly
@@ -1477,6 +1556,8 @@
                     if (glitch67Active) {
                         ctx.shadowColor = '#ff3300';
                         if (frameCount % 4 < 2) ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5);
+                    } else if (koalaNapActive) {
+                        ctx.shadowColor = '#a9a9a9';
                     } else {
                         ctx.shadowColor = player.color;
                     }
@@ -1512,6 +1593,15 @@
                     
                     ctx.fillStyle = '#fff'; ctx.shadowBlur = 0; ctx.beginPath();
                     ctx.arc(0, 0, player.size * 0.4, 0, Math.PI * 2); ctx.fill();
+                    
+                    if (koalaNapActive) {
+                        ctx.fillStyle = '#fff';
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'bottom';
+                        ctx.font = 'bold 16px Courier New';
+                        ctx.fillText('Zzz', 10 + Math.sin(frameCount*0.1)*5, -15 - Math.cos(frameCount*0.1)*5);
+                    }
+
                     ctx.restore();
                 }
             }
@@ -1640,6 +1730,8 @@
                 if (cutsceneType === 'void_shot') textColor = '#8a2be2';
                 if (cutsceneType === 'solar_power') textColor = '#ffd700';
                 if (cutsceneType === 'blood_revive') textColor = '#ff0044';
+                if (cutsceneType === 'alien_shield') textColor = '#7fff00';
+                if (cutsceneType === 'koala_unlock' || cutsceneType === 'koala_nap' || cutsceneType === 'koala_wake') textColor = '#a9a9a9';
                 if (cutsceneType === 'secret_unlock' || cutsceneType === 'glitch_start') textColor = Math.random() > 0.5 ? '#ff3300' : '#fff'; 
                 
                 ctx.fillStyle = textColor;
