@@ -278,6 +278,19 @@
                 console.log('Ready! My ID is: ' + id);
             });
 
+            // NEW: Added error checking so it doesn't get stuck!
+            peer.on('error', (err) => {
+                console.error("PeerJS Error:", err);
+                statusEl.innerText = "Connection Failed!";
+                statusEl.style.color = "#f00";
+                
+                if (err.type === 'peer-unavailable') {
+                    statusEl.innerText = "Room not found!";
+                }
+                
+                document.getElementById('peerjs-ui').style.display = 'block'; // Show menu again so you can retry
+            });
+
             peer.on('connection', (conn) => {
                 if (!isHost) return; // Only the host accepts incoming connections
                 
@@ -342,7 +355,8 @@
             statusEl.style.color = "#ffaa00";
 
             const connectToHost = () => {
-                hostConnection = peer.connect(roomToJoin);
+                // NEW: Added 'reliable: true' to make the connection stronger
+                hostConnection = peer.connect(roomToJoin, { reliable: true });
                 
                 hostConnection.on('open', () => {
                     statusEl.innerText = "Connected to Host!";
