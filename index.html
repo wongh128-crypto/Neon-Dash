@@ -157,6 +157,10 @@
     <div id="score-display">SCORE: <span id="scoreValue">0</span></div>
     <div id="timer-display" class="hidden">67.00</div>
     
+    <div id="multiplayer-status" style="position: absolute; top: 10px; right: 10px; color: #ffaa00; font-size: 14px; z-index: 100; text-shadow: 0 0 5px #ffaa00; pointer-events: none;">
+        Connecting to Network...
+    </div>
+
     <div id="notificationArea"></div>
 
     <div id="ui-layer">
@@ -186,7 +190,11 @@
 
     <canvas id="gameCanvas"></canvas>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const startScreen = document.getElementById('startScreen');
@@ -239,6 +247,80 @@
         let bossKills = 0;
         let glitch67Active = false;
         let glitch67Timer = 0;
+
+        let currentUser = null;
+        let otherPlayers = {};
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.error("Auth error", e);
+            }
+        };
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            const statusEl = document.getElementById('multiplayer-status');
+            if (user) {
+                statusEl.innerText = "Shared World: Online";
+                statusEl.style.color = "#0f0";
+                statusEl.style.textShadow = "0 0 5px #0f0";
+                
+                const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players');
+                onSnapshot(playersRef, (snapshot) => {
+                    const now = Date.now();
+                    snapshot.forEach(docSnap => {
+                        if (docSnap.id !== currentUser.uid) {
+                            const data = docSnap.data();
+                            // Only show players updated recently (within 10 seconds)
+                            if (now - data.lastUpdate < 10000) {
+                                if (!otherPlayers[docSnap.id]) {
+                                    otherPlayers[docSnap.id] = { ...data, displayX: data.x, displayY: data.y };
+                                } else {
+                                    otherPlayers[docSnap.id].targetX = data.x;
+                                    otherPlayers[docSnap.id].targetY = data.y;
+                                    otherPlayers[docSnap.id].score = data.score;
+                                    otherPlayers[docSnap.id].skin = data.skin;
+                                    otherPlayers[docSnap.id].lastUpdate = data.lastUpdate;
+                                }
+                            }
+                        }
+                    });
+                }, (error) => {
+                    console.error("Snapshot error:", error);
+                });
+            } else {
+                statusEl.innerText = "Network Offline";
+                statusEl.style.color = "#f00";
+                statusEl.style.textShadow = "0 0 5px #f00";
+            }
+        });
+
+        // Sync player position to the shared world every 300ms
+        setInterval(() => {
+            if (currentUser && gameState === 'playing') {
+                const playerRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid);
+                setDoc(playerRef, {
+                    x: player.x,
+                    y: player.y,
+                    skin: equippedSkin,
+                    score: Math.floor(score),
+                    lastUpdate: Date.now()
+                }).catch(e => console.error("Update error:", e));
+            }
+        }, 300);
 
         let alienShields = 0;
         let alienMaxShields = 0;
@@ -901,6 +983,20 @@
                 }
             }
 
+            // Animate other players smoothly
+            const now = Date.now();
+            for (let id in otherPlayers) {
+                let p = otherPlayers[id];
+                if (now - p.lastUpdate > 10000) {
+                    delete otherPlayers[id];
+                    continue;
+                }
+                if (p.targetX !== undefined) {
+                    p.displayX += (p.targetX - p.displayX) * 0.15;
+                    p.displayY += (p.targetY - p.displayY) * 0.15;
+                }
+            }
+
             frameCount++;
             difficultyMultiplier = 1 + (frameCount / 2000);
 
@@ -1208,6 +1304,34 @@
             }
 
             ctx.globalCompositeOperation = 'lighter';
+
+            // DRAW OTHER PLAYERS (GHOSTS)
+            for (let id in otherPlayers) {
+                let op = otherPlayers[id];
+                ctx.save();
+                ctx.translate(op.displayX, op.displayY);
+                ctx.globalAlpha = 0.4; // Semi-transparent ghosts
+                
+                let opColor = '#0ff';
+                let opSkin = skins.find(s => s.id === op.skin);
+                if (opSkin) opColor = opSkin.color;
+                
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = opColor;
+                ctx.fillStyle = opColor;
+                
+                ctx.beginPath();
+                ctx.arc(0, 0, 15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw their score
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 12px Courier New';
+                ctx.textAlign = 'center';
+                ctx.shadowBlur = 0;
+                ctx.fillText(op.score, 0, -25);
+                ctx.restore();
+            }
 
             // DRAW TIER 5 LASER
             if (shipTier >= 5 && equippedSkin !== 'alien' && equippedSkin !== 'purple' && (gameState === 'playing' || gameState === 'cutscene')) {
