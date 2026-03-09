@@ -48,6 +48,19 @@
             font-size: 24px;
             font-weight: bold;
             text-shadow: 0 0 10px #0ff;
+            z-index: 20;
+        }
+
+        #timer-display {
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #f00;
+            font-size: 40px;
+            font-weight: bold;
+            text-shadow: 0 0 15px #f00;
+            z-index: 20;
         }
 
         .screen {
@@ -142,6 +155,7 @@
 <body>
 
     <div id="score-display">SCORE: <span id="scoreValue">0</span></div>
+    <div id="timer-display" class="hidden">67.00</div>
     
     <div id="notificationArea"></div>
 
@@ -155,10 +169,10 @@
             </div>
         </div>
 
-        <div id="skinsScreen" class="screen hidden" style="width: 350px;">
+        <div id="skinsScreen" class="screen hidden" style="width: 400px;">
             <h1 style="color: #0ff; text-shadow: 0 0 15px #0ff; font-size: 36px;">ARMORY</h1>
-            <p style="margin-bottom: 15px; font-size: 14px;">Select your ship's appearance.</p>
-            <div id="skinsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto; margin-bottom: 20px; padding-right: 10px; text-align: left;">
+            <p style="margin-bottom: 15px; font-size: 14px;">Equip a chassis. Every skin has a unique Special Ability.</p>
+            <div id="skinsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 350px; overflow-y: auto; margin-bottom: 20px; padding-right: 10px; text-align: left;">
             </div>
             <button id="backToMenuBtn">Back to Menu</button>
         </div>
@@ -179,6 +193,7 @@
         const gameOverScreen = document.getElementById('gameOverScreen');
         const scoreValue = document.getElementById('scoreValue');
         const finalScore = document.getElementById('finalScore');
+        const timerDisplay = document.getElementById('timer-display');
         
         let width, height;
         let gameState = 'start';
@@ -210,17 +225,28 @@
         let upgradeFlashAlpha = 0;
         let mothershipY = -200;
 
+        // ABILITY VARIABLES
+        let magentaShieldActive = false;
+        let magentaNextThreshold = 1000;
+        let limeCutscenePlayed = false;
+        let solarCutscenePlayed = false;
+        let voidTimer = 180;
+        let voidCutscenePlayed = false;
+        let bossKills = 0;
+        let glitch67Active = false;
+        let glitch67Timer = 0;
+
         let unlockedSkins = ['cyan'];
         let equippedSkin = 'cyan';
         let recentUnlock = null;
         const skins = [
-            { id: 'cyan', color: '#0ff', name: 'Classic Cyan', req: 0, desc: 'Default issue chassis.' },
-            { id: 'magenta', color: '#f0f', name: 'Neon Magenta', req: 500, desc: 'Unlocks at 500 pts' },
-            { id: 'lime', color: '#0f0', name: 'Lime Venom', req: 1000, desc: 'Unlocks at 1000 pts' },
-            { id: 'gold', color: '#ffd700', name: 'Solar Flare', req: 1500, desc: 'Unlocks at 1500 pts' },
-            { id: 'purple', color: '#8a2be2', name: 'Deep Void', req: 2000, desc: 'Unlocks at 2000 pts' },
-            { id: 'blood', color: '#ff0044', name: 'Blood Moon', req: 2500, desc: 'Unlocks at 2500 pts' },
-            { id: 'secret67', color: '#ff3300', name: 'Glitch 67', req: -1, desc: 'Classified requirement.' }
+            { id: 'cyan', color: '#0ff', name: 'Classic Cyan', req: 0, desc: 'Reliable. No special abilities.' },
+            { id: 'magenta', color: '#f0f', name: 'Neon Magenta', req: 500, desc: 'Purpur Shield: Blocks 1 lethal hit every 1000 pts.' },
+            { id: 'lime', color: '#0f0', name: 'Lime Venom', req: 1000, desc: 'Decay Aura: Melts nearby boss projectiles.' },
+            { id: 'gold', color: '#ffd700', name: 'Solar Flare', req: 1500, desc: 'Massive bullets, but your hitbox is increased.' },
+            { id: 'purple', color: '#8a2be2', name: 'Deep Void', req: 2000, desc: 'Singularity: Fires a piercing Black Hole every 3s.' },
+            { id: 'blood', color: '#ff0044', name: 'Blood Moon', req: 2500, desc: 'Rejuvenate: 20% chance to revive (+5% per boss kill).' },
+            { id: 'secret67', color: '#ff3300', name: 'Glitch 67', req: -1, desc: 'Anomaly: Die at boss? 67s invincible to kill & revive.' }
         ];
 
         function resize() {
@@ -238,8 +264,14 @@
         window.addEventListener('resize', resize);
         resize();
 
+        function getDist(p1, p2) {
+            const dx = p1.x - p2.x;
+            const dy = p1.y - p2.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
         function updateTarget(e) {
-            if (gameState !== 'playing' && !(gameState === 'cutscene' && (cutsceneType === 'boss_defeat' || cutsceneType === 'skin_unlock'))) return;
+            if (gameState !== 'playing' && !(gameState === 'cutscene' && (cutsceneType === 'boss_defeat' || cutsceneType === 'skin_unlock' || cutsceneType === 'magenta_block' || cutsceneType === 'lime_decay' || cutsceneType === 'void_shot' || cutsceneType === 'solar_power'))) return;
             
             let clientX, clientY;
             if (e.touches && e.touches.length > 0) {
@@ -316,12 +348,12 @@
                 }
 
                 div.innerHTML = `
-                    <div style="flex-grow: 1;">
+                    <div style="flex-grow: 1; padding-right: 10px;">
                         <div style="font-weight: bold; font-size: 16px; color: ${isUnlocked ? s.color : '#555'}; text-shadow: 0 0 5px ${isUnlocked ? s.color : 'transparent'};">
                             ${isUnlocked || s.req !== -1 ? s.name : '???'}
                         </div>
-                        <div style="font-size: 12px; color: ${isUnlocked ? '#ccc' : '#444'}; margin-top: 4px;">
-                            ${isUnlocked && s.req === -1 ? 'Unlocked via Secret 67' : s.desc}
+                        <div style="font-size: 11px; color: ${isUnlocked ? '#ccc' : '#444'}; margin-top: 4px; line-height: 1.2;">
+                            ${isUnlocked && s.req === -1 ? 'Anomaly Acquired: Glitch 67 mode available.' : s.desc}
                         </div>
                     </div>
                     <div>${btnHtml}</div>
@@ -356,6 +388,7 @@
             gameState = 'playing';
             startScreen.classList.add('hidden');
             gameOverScreen.classList.add('hidden');
+            timerDisplay.classList.add('hidden');
             score = 0;
             frameCount = 0;
             difficultyMultiplier = 1;
@@ -375,6 +408,19 @@
             nextUpgradeScore = 1000;
             upgradeFlashAlpha = 0;
             mothershipY = -200;
+
+            // Reset Abilities
+            magentaShieldActive = false;
+            magentaNextThreshold = 1000;
+            limeCutscenePlayed = false;
+            solarCutscenePlayed = false;
+            voidTimer = 180;
+            voidCutscenePlayed = false;
+            bossKills = 0;
+            glitch67Active = false;
+            glitch67Timer = 0;
+
+            player.size = (equippedSkin === 'gold') ? 25 : 15; // Solar Flare Hitbox
             
             gameState = 'cutscene';
             cutsceneType = 'intro';
@@ -390,9 +436,68 @@
             updateScore(0);
         }
 
+        // --- NEW CENTRALIZED DAMAGE HANDLER ---
+        function handlePlayerHit() {
+            if (glitch67Active) return; // Invincible during 67 mode
+
+            if (equippedSkin === 'magenta' && magentaShieldActive) {
+                magentaShieldActive = false;
+                gameState = 'cutscene';
+                cutsceneType = 'magenta_block';
+                cutsceneTimer = 60;
+                cutsceneText = 'PURPUR SHIELD DEPLOYED';
+                
+                // Blast away nearby enemies!
+                obstacles = obstacles.filter(o => {
+                    if (getDist(player, o) < 200) { createExplosion(o.x, o.y, '#f0f', 5); return false; }
+                    return true;
+                });
+                missiles = missiles.filter(m => {
+                    if (getDist(player, m) < 200) { createExplosion(m.x, m.y, '#f0f', 5); return false; }
+                    return true;
+                });
+                createExplosion(player.x, player.y, '#f0f', 80);
+                screenShake = 15;
+                return;
+            }
+
+            if (equippedSkin === 'secret67' && boss.active && !glitch67Active) {
+                glitch67Active = true;
+                glitch67Timer = 67 * 60; // 67 Seconds at 60fps
+                gameState = 'cutscene';
+                cutsceneType = 'glitch_start';
+                cutsceneTimer = 90;
+                cutsceneText = '67 SECONDS TO SURVIVE';
+                createExplosion(player.x, player.y, '#ff3300', 50);
+                timerDisplay.classList.remove('hidden');
+                screenShake = 10;
+                return;
+            }
+
+            if (equippedSkin === 'blood') {
+                let reviveChance = 0.20 + (bossKills * 0.05);
+                if (Math.random() < reviveChance) {
+                    gameState = 'cutscene';
+                    cutsceneType = 'blood_revive';
+                    cutsceneTimer = 90;
+                    cutsceneText = 'BLOOD MOON RISES';
+                    
+                    obstacles = []; missiles = []; jets = []; bullets = [];
+                    player.x = width / 2; player.y = height / 1.5;
+                    player.targetX = width / 2; player.targetY = height / 1.5;
+                    createExplosion(player.x, player.y, '#ff0044', 150);
+                    screenShake = 20;
+                    return;
+                }
+            }
+
+            // If no saves triggered, actual Game Over
+            gameOver();
+        }
+
         function gameOver() {
             if (gameState === 'cutscene') return; 
-            
+            timerDisplay.classList.add('hidden');
             gameState = 'cutscene';
             cutsceneType = 'player_death';
             cutsceneTimer = 90; 
@@ -406,6 +511,14 @@
             
             if (currentIntScore > highScore) highScore = currentIntScore;
             
+            // Check for Magenta Shield Proc
+            if (equippedSkin === 'magenta' && currentIntScore >= magentaNextThreshold && !magentaShieldActive) {
+                magentaShieldActive = true;
+                magentaNextThreshold += 1000;
+                showNotification('ABILITY READY', 'Purpur Shield Online', '#f0f');
+                createExplosion(player.x, player.y, '#f0f', 20);
+            }
+
             let unlockedAny = false;
             skins.forEach(s => {
                 if (s.req > 0 && highScore >= s.req && !unlockedSkins.includes(s.id)) {
@@ -451,24 +564,39 @@
         function spawnBullet() {
             const bColor = player.color;
             const bText = equippedSkin === 'secret67' ? '67' : null;
+            let sizeMult = equippedSkin === 'gold' ? 3 : 1; // Solar Flare logic
             
-            bullets.push({ x: player.x, y: player.y - player.size, size: 5, speedY: -12, speedX: 0, color: bColor, text: bText });
+            bullets.push({ x: player.x, y: player.y - player.size, size: 5 * sizeMult, speedY: -12, speedX: 0, color: bColor, text: bText });
             
-            if (shipTier >= 1) { // 3 shots
-                bullets.push({ x: player.x - 12, y: player.y - player.size + 5, size: 4, speedY: -12, speedX: 0, color: bColor, text: bText });
-                bullets.push({ x: player.x + 12, y: player.y - player.size + 5, size: 4, speedY: -12, speedX: 0, color: bColor, text: bText });
+            if (shipTier >= 1) { 
+                bullets.push({ x: player.x - 12, y: player.y - player.size + 5, size: 4 * sizeMult, speedY: -12, speedX: 0, color: bColor, text: bText });
+                bullets.push({ x: player.x + 12, y: player.y - player.size + 5, size: 4 * sizeMult, speedY: -12, speedX: 0, color: bColor, text: bText });
             }
-            if (shipTier >= 2) { // 5 shots
-                bullets.push({ x: player.x - 20, y: player.y, size: 4, speedY: -10, speedX: -3, color: bColor, text: bText });
-                bullets.push({ x: player.x + 20, y: player.y, size: 4, speedY: -10, speedX: 3, color: bColor, text: bText });
+            if (shipTier >= 2) { 
+                bullets.push({ x: player.x - 20, y: player.y, size: 4 * sizeMult, speedY: -10, speedX: -3, color: bColor, text: bText });
+                bullets.push({ x: player.x + 20, y: player.y, size: 4 * sizeMult, speedY: -10, speedX: 3, color: bColor, text: bText });
             }
-            if (shipTier >= 3) { // 7 shots
-                bullets.push({ x: player.x - 30, y: player.y + 10, size: 4, speedY: -8, speedX: -6, color: bColor, text: bText });
-                bullets.push({ x: player.x + 30, y: player.y + 10, size: 4, speedY: -8, speedX: 6, color: bColor, text: bText });
+            if (shipTier >= 3) { 
+                bullets.push({ x: player.x - 30, y: player.y + 10, size: 4 * sizeMult, speedY: -8, speedX: -6, color: bColor, text: bText });
+                bullets.push({ x: player.x + 30, y: player.y + 10, size: 4 * sizeMult, speedY: -8, speedX: 6, color: bColor, text: bText });
             }
-            if (shipTier >= 4) { // 9 shots
-                bullets.push({ x: player.x - 40, y: player.y + 20, size: 4, speedY: -6, speedX: -9, color: bColor, text: bText });
-                bullets.push({ x: player.x + 40, y: player.y + 20, size: 4, speedY: -6, speedX: 9, color: bColor, text: bText });
+            if (shipTier >= 4) { 
+                bullets.push({ x: player.x - 40, y: player.y + 20, size: 4 * sizeMult, speedY: -6, speedX: -9, color: bColor, text: bText });
+                bullets.push({ x: player.x + 40, y: player.y + 20, size: 4 * sizeMult, speedY: -6, speedX: 9, color: bColor, text: bText });
+            }
+        }
+
+        function spawnBlackHole() {
+            const bhSize = 25 + (shipTier * 5); // Scale with upgrades
+            bullets.push({ x: player.x, y: player.y - player.size, size: bhSize, speedY: -4, speedX: 0, color: '#8a2be2', isBlackHole: true });
+            
+            if (!voidCutscenePlayed) {
+                voidCutscenePlayed = true;
+                gameState = 'cutscene';
+                cutsceneType = 'void_shot';
+                cutsceneTimer = 60;
+                cutsceneText = 'SINGULARITY DEPLOYED';
+                screenShake = 5;
             }
         }
 
@@ -512,77 +640,78 @@
         }
 
         function update() {
-            // ALWAYS UPDATE PARTICLES (Even during Game Over)
             for (let i = particles.length - 1; i >= 0; i--) {
                 let p = particles[i];
-                p.x += p.vx;
-                p.y += p.vy;
-                p.life -= p.decay;
+                p.x += p.vx; p.y += p.vy; p.life -= p.decay;
                 if (p.life <= 0) particles.splice(i, 1);
             }
 
-            // DO NOTHING IF ON START SCREEN
             if (gameState === 'start') return;
 
-            // IF GAME OVER, LET REMAINING ENTITIES DRIFT OFF SCREEN
             if (gameState === 'gameover') {
-                if (boss.active) boss.y -= 1; // Boss slowly flies away
-                
+                if (boss.active) boss.y -= 1; 
                 for (let i = bullets.length - 1; i >= 0; i--) {
-                    let b = bullets[i];
-                    b.y += b.speedY; b.x += b.speedX || 0;
+                    let b = bullets[i]; b.y += b.speedY; b.x += b.speedX || 0;
                     if (b.y < -50 || b.y > height + 50 || b.x < -50 || b.x > width + 50) bullets.splice(i, 1);
                 }
                 for (let i = obstacles.length - 1; i >= 0; i--) {
-                    let obs = obstacles[i];
-                    obs.y += obs.speedY; obs.x += obs.speedX; obs.rotation += obs.rotationSpeed;
+                    let obs = obstacles[i]; obs.y += obs.speedY; obs.x += obs.speedX; obs.rotation += obs.rotationSpeed;
                     if (obs.y > height + obs.size || obs.x < -obs.size || obs.x > width + obs.size) obstacles.splice(i, 1);
                 }
                 for (let i = missiles.length - 1; i >= 0; i--) {
-                    let m = missiles[i];
-                    m.x += m.vx; m.y += m.vy;
+                    let m = missiles[i]; m.x += m.vx; m.y += m.vy;
                     if (m.y > height + 50 || m.x < -50 || m.x > width + 50 || m.y < -50) missiles.splice(i, 1);
                 }
                 for (let i = jets.length - 1; i >= 0; i--) {
-                    let j = jets[i];
-                    j.x += j.speedX;
+                    let j = jets[i]; j.x += j.speedX;
                     if (j.x < -100 || j.x > width + 100) jets.splice(i, 1);
                 }
                 for (let i = collectibles.length - 1; i >= 0; i--) {
-                    let col = collectibles[i];
-                    col.y += col.speedY; col.pulse += 0.1;
+                    let col = collectibles[i]; col.y += col.speedY; col.pulse += 0.1;
                     if (col.y > height + col.size) collectibles.splice(i, 1);
                 }
                 return;
             }
 
+            // CUTSCENE LOGIC UPDATES
             if (gameState === 'cutscene') {
                 frameCount++;
                 cutsceneTimer--;
+                
+                // Allow player to move slightly during non-death cutscenes
+                if (['magenta_block', 'lime_decay', 'void_shot', 'solar_power'].includes(cutsceneType)) {
+                    const ease = 0.15;
+                    player.x += (player.targetX - player.x) * ease;
+                    player.y += (player.targetY - player.y) * ease;
+                    if (cutsceneTimer <= 0) gameState = 'playing';
+                    // Allow bullets to continue flying
+                    for (let i = bullets.length - 1; i >= 0; i--) {
+                        let b = bullets[i]; b.y += b.speedY; b.x += b.speedX || 0;
+                    }
+                    return;
+                }
 
                 if (cutsceneType === 'intro') {
                     player.y += (player.targetY - player.y) * 0.05;
                     if (cutsceneTimer <= 0) gameState = 'playing';
-                } else if (cutsceneType === 'skin_unlock') {
+                } else if (cutsceneType === 'skin_unlock' || cutsceneType === 'glitch_success' || cutsceneType === 'blood_revive') {
                     const ease = 0.15;
                     player.x += (player.targetX - player.x) * ease;
                     player.y += (player.targetY - player.y) * ease;
-                    player.x = Math.max(player.size, Math.min(width - player.size, player.x));
-                    player.y = Math.max(player.size, Math.min(height - player.size, player.y));
                     
-                    if (cutsceneTimer % 5 === 0 && recentUnlock) {
+                    if (cutsceneTimer % 5 === 0 && recentUnlock && cutsceneType === 'skin_unlock') {
                         createExplosion(player.x, player.y, recentUnlock.color, 3);
                     }
                     if (cutsceneTimer <= 0) {
                         gameState = 'playing';
-                        showNotification('SKIN UNLOCKED', recentUnlock.name, recentUnlock.color);
+                        if (cutsceneType === 'skin_unlock') showNotification('SKIN UNLOCKED', recentUnlock.name, recentUnlock.color);
                     }
+                } else if (cutsceneType === 'glitch_start') {
+                    if (cutsceneTimer <= 0) gameState = 'playing';
                 } else if (cutsceneType === 'boss_defeat') {
                     const ease = 0.15;
                     player.x += (player.targetX - player.x) * ease;
                     player.y += (player.targetY - player.y) * ease;
-                    player.x = Math.max(player.size, Math.min(width - player.size, player.x));
-                    player.y = Math.max(player.size, Math.min(height - player.size, player.y));
 
                     if (cutsceneTimer % 5 === 0) {
                         createExplosion(boss.x + (Math.random() - 0.5) * boss.size * 2, boss.y + (Math.random() - 0.5) * boss.size * 2, '#ff0', 5);
@@ -593,6 +722,7 @@
                     if (cutsceneTimer <= 0) {
                         createExplosion(boss.x, boss.y, boss.color, 150);
                         boss.active = false;
+                        bossKills++;
                         updateScore(500 * bossLevel);
                         nextBossScore = score + 500 * bossLevel + 300;
                         bossLevel++;
@@ -601,7 +731,6 @@
                     }
                 } else if (cutsceneType === 'player_death') {
                     screenShake = 10;
-                    
                     if (cutsceneTimer % 3 === 0) {
                         const angle = Math.random() * Math.PI * 2;
                         const dist = Math.max(width, height) * 0.8;
@@ -615,8 +744,7 @@
                     for (let i = obstacles.length - 1; i >= 0; i--) {
                         let obs = obstacles[i];
                         obs.x += obs.speedX; obs.y += obs.speedY; obs.rotation += obs.rotationSpeed;
-                        const dx = player.x - obs.x; const dy = player.y - obs.y;
-                        if (Math.sqrt(dx * dx + dy * dy) < player.size + (obs.size * 0.8)) {
+                        if (getDist(player, obs) < player.size + (obs.size * 0.8)) {
                             createExplosion(player.x, player.y, '#f00', 8);
                             obstacles.splice(i, 1);
                         }
@@ -624,7 +752,6 @@
 
                     if (cutsceneTimer <= 0) {
                         const finalIntScore = Math.floor(score);
-                        
                         if (finalIntScore === 67 && !unlockedSkins.includes('secret67')) {
                             unlockedSkins.push('secret67');
                             recentUnlock = skins.find(s => s.id === 'secret67');
@@ -645,12 +772,10 @@
                     screenShake = 5;
                     if (cutsceneTimer === 120) cutsceneText = 'SYSTEM OVERRIDE';
                     if (cutsceneTimer === 60) cutsceneText = 'GLITCH 67 ACQUIRED';
-                    
                     if (cutsceneTimer % 2 === 0) {
                         createExplosion(Math.random() * width, Math.random() * height, '#ff3300', 1);
                         createExplosion(Math.random() * width, Math.random() * height, '#fff', 1);
                     }
-
                     if (cutsceneTimer <= 0) {
                         gameState = 'gameover';
                         gameOverScreen.classList.remove('hidden');
@@ -682,10 +807,29 @@
                         mothershipY += (-300 - mothershipY) * 0.05;
                         cutsceneText = '';
                     }
-
                     if (cutsceneTimer <= 0) gameState = 'playing';
                 }
                 return;
+            }
+
+            // SOLAR FLARE INIT
+            if (equippedSkin === 'gold' && !solarCutscenePlayed) {
+                solarCutscenePlayed = true;
+                gameState = 'cutscene';
+                cutsceneType = 'solar_power';
+                cutsceneTimer = 80;
+                cutsceneText = 'SOLAR FLARE ACTIVE';
+                return;
+            }
+
+            // GLITCH 67 TIMER
+            if (glitch67Active) {
+                glitch67Timer--;
+                timerDisplay.innerText = (glitch67Timer / 60).toFixed(2);
+                if (glitch67Timer <= 0) {
+                    glitch67Active = false;
+                    gameOver();
+                }
             }
 
             frameCount++;
@@ -696,6 +840,28 @@
             player.y += (player.targetY - player.y) * ease;
             player.x = Math.max(player.size, Math.min(width - player.size, player.x));
             player.y = Math.max(player.size, Math.min(height - player.size, player.y));
+
+            // LIME VENOM PASSIVE (Decay logic)
+            if (equippedSkin === 'lime' && boss.active) {
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    let obs = obstacles[i];
+                    if (obs.color === '#f0f' && getDist(player, obs) < 220) {
+                        obs.size -= 0.6; // Decay the projectile!
+                        createExplosion(obs.x, obs.y, '#0f0', 1); // Green poison particle
+                        if (obs.size < 3) {
+                            obstacles.splice(i, 1);
+                            createExplosion(obs.x, obs.y, '#0f0', 10);
+                            if (!limeCutscenePlayed) {
+                                limeCutscenePlayed = true;
+                                gameState = 'cutscene';
+                                cutsceneType = 'lime_decay';
+                                cutsceneTimer = 70;
+                                cutsceneText = 'DECAY AURA ENGAGED';
+                            }
+                        }
+                    }
+                }
+            }
 
             let spawnRate = Math.max(10, Math.floor(40 - (difficultyMultiplier * 5)));
             
@@ -708,21 +874,14 @@
                     cutsceneType = 'upgrade';
                     cutsceneTimer = 250; 
                     cutsceneText = 'MOTHERSHIP INBOUND';
-                    player.targetX = width / 2;
-                    player.targetY = height / 1.5;
-                    mothershipY = -200;
-                    upgradeFlashAlpha = 0;
+                    player.targetX = width / 2; player.targetY = height / 1.5;
+                    mothershipY = -200; upgradeFlashAlpha = 0;
                 }
                 else if (score >= nextBossScore) {
-                    boss.active = true;
-                    boss.state = 'entering';
-                    boss.x = width / 2;
-                    boss.y = -100;
-                    boss.maxHealth = 400 * bossLevel;
-                    boss.health = boss.maxHealth;
-                    boss.speedX = 5 + bossLevel;      
-                    boss.fireTimer = 0;
-                    boss.jetTimer = 0;                
+                    boss.active = true; boss.state = 'entering';
+                    boss.x = width / 2; boss.y = -100;
+                    boss.maxHealth = 400 * bossLevel; boss.health = boss.maxHealth;
+                    boss.speedX = 5 + bossLevel; boss.fireTimer = 0; boss.jetTimer = 0;                
                 }
             } else {
                 if (boss.state === 'entering') {
@@ -747,62 +906,75 @@
                     }
                 }
                 
-                bulletTimer++;
-                if (bulletTimer >= 8) {
-                    spawnBullet();
-                    bulletTimer = 0;
+                // DEEP VOID LOGIC VS NORMAL SHOOTING
+                if (equippedSkin === 'purple') {
+                    voidTimer++;
+                    if (voidTimer >= 180) { // 3 seconds
+                        spawnBlackHole();
+                        voidTimer = 0;
+                    }
+                } else {
+                    bulletTimer++;
+                    if (bulletTimer >= 8) {
+                        spawnBullet();
+                        bulletTimer = 0;
+                    }
                 }
             }
 
             if (!boss.active && frameCount % 10 === 0) updateScore(1 * difficultyMultiplier);
 
+            // BULLETS UPDATE
             for (let i = bullets.length - 1; i >= 0; i--) {
                 let b = bullets[i];
-                b.y += b.speedY;
-                b.x += b.speedX || 0;
+                b.y += b.speedY; b.x += b.speedX || 0;
                 
                 if (boss.active && boss.state !== 'entering') {
-                    const dx = b.x - boss.x;
-                    const dy = b.y - boss.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    
-                    if (dist < boss.size * 0.8) {
-                        boss.health -= 10;
-                        createExplosion(b.x, b.y, b.color, 3);
-                        bullets.splice(i, 1);
+                    const dist = getDist(b, boss);
+                    if (dist < boss.size * 0.8 + b.size) {
+                        // Black holes pierce and deal damage per frame touching
+                        boss.health -= b.isBlackHole ? 4 : 10; 
+                        createExplosion(b.x, b.y - b.size, b.color, b.isBlackHole ? 1 : 3);
+                        
+                        if (!b.isBlackHole) bullets.splice(i, 1);
                         
                         if (boss.health <= 0) {
-                            gameState = 'cutscene';
-                            cutsceneType = 'boss_defeat';
-                            cutsceneTimer = 120;
-                            cutsceneText = 'TARGET DESTROYED';
+                            if (glitch67Active) {
+                                glitch67Active = false;
+                                timerDisplay.classList.add('hidden');
+                                gameState = 'cutscene';
+                                cutsceneType = 'glitch_success';
+                                cutsceneTimer = 120;
+                                cutsceneText = 'ANOMALY SURVIVED - REVIVING';
+                                bossKills++;
+                            } else {
+                                gameState = 'cutscene';
+                                cutsceneType = 'boss_defeat';
+                                cutsceneTimer = 120;
+                                cutsceneText = 'TARGET DESTROYED';
+                            }
                         }
                         continue;
                     }
                 }
-                if (b.y < -10) bullets.splice(i, 1);
+                if (b.y < -30) bullets.splice(i, 1);
             }
 
+            // JETS UPDATE
             for (let i = jets.length - 1; i >= 0; i--) {
                 let j = jets[i];
-                j.x += j.speedX;
-                j.y += Math.sin(frameCount * 0.05) * 1.5;
+                j.x += j.speedX; j.y += Math.sin(frameCount * 0.05) * 1.5;
 
                 j.fireTimer++;
-                if (j.fireTimer > 80) {
-                    spawnMissile(j.x, j.y);
-                    j.fireTimer = 0;
-                }
+                if (j.fireTimer > 80) { spawnMissile(j.x, j.y); j.fireTimer = 0; }
 
                 let jetHit = false;
                 for (let k = bullets.length - 1; k >= 0; k--) {
                     let b = bullets[k];
-                    const dx = b.x - j.x;
-                    const dy = b.y - j.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < j.size + b.size) {
-                        j.health -= 10;
+                    if (getDist(b, j) < j.size + b.size) {
+                        j.health -= b.isBlackHole ? 4 : 10;
                         createExplosion(b.x, b.y, '#ff0', 3);
-                        bullets.splice(k, 1);
+                        if (!b.isBlackHole) bullets.splice(k, 1);
                         jetHit = true;
                         if (j.health <= 0) {
                             createExplosion(j.x, j.y, j.color, 20);
@@ -815,77 +987,56 @@
                 if (!jetHit && (j.x < -100 || j.x > width + 100)) jets.splice(i, 1);
             }
 
+            // MISSILES UPDATE
             for (let i = missiles.length - 1; i >= 0; i--) {
-                let m = missiles[i];
-                m.life--;
+                let m = missiles[i]; m.life--;
                 
-                const dxToPlayer = player.x - m.x;
-                const dyToPlayer = player.y - m.y;
+                const dxToPlayer = player.x - m.x; const dyToPlayer = player.y - m.y;
                 const distToPlayer = Math.sqrt(dxToPlayer * dxToPlayer + dyToPlayer * dyToPlayer);
                 
                 m.vx += (dxToPlayer / distToPlayer) * 0.25; 
                 m.vy += (dyToPlayer / distToPlayer) * 0.25;
                 
                 const currentSpeed = Math.sqrt(m.vx * m.vx + m.vy * m.vy);
-                m.vx = (m.vx / currentSpeed) * m.speed;
-                m.vy = (m.vy / currentSpeed) * m.speed;
+                m.vx = (m.vx / currentSpeed) * m.speed; m.vy = (m.vy / currentSpeed) * m.speed;
 
-                m.x += m.vx;
-                m.y += m.vy;
+                m.x += m.vx; m.y += m.vy;
 
                 if (frameCount % 3 === 0) {
-                    particles.push({
-                        x: m.x, y: m.y, vx: 0, vy: 0,
-                        size: 2, color: m.color, life: 0.5, decay: 0.05
-                    });
+                    particles.push({ x: m.x, y: m.y, vx: 0, vy: 0, size: 2, color: m.color, life: 0.5, decay: 0.05 });
                 }
 
                 let missileDestroyed = false;
                 for (let k = bullets.length - 1; k >= 0; k--) {
                     let b = bullets[k];
-                    const dx = b.x - m.x;
-                    const dy = b.y - m.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < m.size + b.size) {
+                    if (getDist(b, m) < m.size + b.size) {
                         createExplosion(m.x, m.y, m.color, 15); 
-                        bullets.splice(k, 1);
+                        if (!b.isBlackHole) bullets.splice(k, 1);
                         missiles.splice(i, 1);
                         missileDestroyed = true;
                         break;
                     }
                 }
-                
                 if (missileDestroyed) continue;
 
-                if (m.life <= 0) {
-                    createExplosion(m.x, m.y, m.color, 15); 
-                    missiles.splice(i, 1);
-                    continue;
-                }
+                if (m.life <= 0) { createExplosion(m.x, m.y, m.color, 15); missiles.splice(i, 1); continue; }
 
                 if (distToPlayer < player.size + m.size) {
                     createExplosion(m.x, m.y, m.color, 20); 
                     missiles.splice(i, 1);
-                    gameOver();
+                    handlePlayerHit();
                     continue;
                 }
-
-                if (m.y > height + 50 || m.x < -50 || m.x > width + 50 || m.y < -50) {
-                    missiles.splice(i, 1);
-                }
+                if (m.y > height + 50 || m.x < -50 || m.x > width + 50 || m.y < -50) missiles.splice(i, 1);
             }
 
+            // OBSTACLES UPDATE
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let obs = obstacles[i];
-                obs.y += obs.speedY;
-                obs.x += obs.speedX;
-                obs.rotation += obs.rotationSpeed;
+                obs.y += obs.speedY; obs.x += obs.speedX; obs.rotation += obs.rotationSpeed;
 
-                const dx = player.x - obs.x;
-                const dy = player.y - obs.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                
-                if (distance < player.size + (obs.size * 0.8)) {
-                    gameOver();
+                if (getDist(player, obs) < player.size + (obs.size * 0.8)) {
+                    handlePlayerHit();
                 }
 
                 if (obs.y > height + obs.size || obs.x < -obs.size || obs.x > width + obs.size) {
@@ -893,28 +1044,28 @@
                 }
             }
 
+            // COLLECTIBLES UPDATE
             for (let i = collectibles.length - 1; i >= 0; i--) {
                 let col = collectibles[i];
-                col.y += col.speedY;
-                col.pulse += 0.1;
+                col.y += col.speedY; col.pulse += 0.1;
 
-                const dx = player.x - col.x;
-                const dy = player.y - col.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance < player.size + col.size) {
+                if (getDist(player, col) < player.size + col.size) {
                     updateScore(50);
                     createExplosion(col.x, col.y, col.color, 15);
                     collectibles.splice(i, 1);
                     continue;
                 }
-
                 if (col.y > height + col.size) collectibles.splice(i, 1);
             }
         }
 
         function draw() {
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.3)';
+            // Screen Flash logic for Glitch 67
+            if (glitch67Active) {
+                ctx.fillStyle = `rgba(255, 0, 0, ${0.1 + Math.sin(frameCount * 0.1) * 0.05})`;
+            } else {
+                ctx.fillStyle = 'rgba(5, 5, 5, 0.3)';
+            }
             ctx.fillRect(0, 0, width, height);
             
             ctx.save();
@@ -930,11 +1081,29 @@
                 if (cutsceneType !== 'secret_unlock') {
                     ctx.save();
                     ctx.translate(player.x, player.y);
+                    
+                    // MAGENTA SHIELD RENDER
+                    if (magentaShieldActive) {
+                        ctx.beginPath();
+                        ctx.arc(0, 0, player.size + 15 + Math.sin(frameCount * 0.1) * 5, 0, Math.PI * 2);
+                        ctx.strokeStyle = '#f0f'; ctx.lineWidth = 3;
+                        ctx.shadowBlur = 15; ctx.shadowColor = '#f0f';
+                        ctx.stroke();
+                        ctx.fillStyle = 'rgba(255, 0, 255, 0.1)'; ctx.fill();
+                    }
+
+                    // GLITCH 67 INVINCIBILITY RENDER
+                    if (glitch67Active) {
+                        ctx.shadowColor = '#ff3300';
+                        if (frameCount % 4 < 2) ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5);
+                    } else {
+                        ctx.shadowColor = player.color;
+                    }
+
                     ctx.fillStyle = player.color;
                     ctx.strokeStyle = player.color;
                     ctx.lineWidth = 2;
                     ctx.shadowBlur = 20;
-                    ctx.shadowColor = player.color;
                     ctx.beginPath();
                     
                     if (shipTier === 0) {
@@ -955,11 +1124,9 @@
                         ctx.moveTo(player.size, 0); ctx.lineTo(player.size * 3, player.size * 2); ctx.lineTo(player.size * 0.8, -player.size * 1.2);
                         ctx.moveTo(-player.size*1.5, player.size); ctx.lineTo(-player.size*2, -player.size*0.5);
                         ctx.moveTo(player.size*1.5, player.size); ctx.lineTo(player.size*2, -player.size*0.5);
-                        // Energy Ring
                         ctx.moveTo(player.size * 2.5, 0); ctx.arc(0, 0, player.size * 2.5, 0, Math.PI * 2);
                         ctx.stroke();
                     } else {
-                        // Tier 4+: Geometric Starburst shape
                         for (let i = 0; i < 8; i++) {
                             ctx.rotate(Math.PI / 4);
                             ctx.moveTo(0, 0); ctx.lineTo(0, -player.size * 2.5);
@@ -986,6 +1153,11 @@
                     ctx.font = 'bold ' + (b.size * 3) + 'px Courier New';
                     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                     ctx.fillText(b.text, b.x, b.y);
+                } else if (b.isBlackHole) {
+                    ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2); 
+                    ctx.fillStyle = '#000'; ctx.fill();
+                    ctx.lineWidth = 3; ctx.strokeStyle = '#8a2be2'; ctx.stroke();
+                    ctx.shadowBlur = 20; ctx.beginPath(); ctx.arc(b.x, b.y, b.size + Math.sin(frameCount * 0.2)*5, 0, Math.PI * 2); ctx.stroke();
                 } else {
                     ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2); ctx.fill();
                 }
@@ -1078,7 +1250,12 @@
             if (gameState === 'cutscene' && cutsceneText) {
                 let textColor = '#0ff';
                 if (cutsceneType === 'skin_unlock' && recentUnlock) textColor = recentUnlock.color;
-                if (cutsceneType === 'secret_unlock') textColor = Math.random() > 0.5 ? '#ff3300' : '#fff'; 
+                if (cutsceneType === 'magenta_block') textColor = '#f0f';
+                if (cutsceneType === 'lime_decay') textColor = '#0f0';
+                if (cutsceneType === 'void_shot') textColor = '#8a2be2';
+                if (cutsceneType === 'solar_power') textColor = '#ffd700';
+                if (cutsceneType === 'blood_revive') textColor = '#ff0044';
+                if (cutsceneType === 'secret_unlock' || cutsceneType === 'glitch_start') textColor = Math.random() > 0.5 ? '#ff3300' : '#fff'; 
                 
                 ctx.fillStyle = textColor;
                 ctx.font = 'bold 40px Courier New';
@@ -1088,11 +1265,11 @@
                 ctx.shadowColor = textColor;
                 
                 let alpha = 1;
-                if (cutsceneTimer > 100 && (cutsceneType === 'boss_defeat' || cutsceneType === 'skin_unlock')) alpha = (120 - cutsceneTimer) / 20;
+                if (cutsceneTimer > 100 && (cutsceneType === 'boss_defeat' || cutsceneType === 'skin_unlock' || cutsceneType === 'glitch_success')) alpha = (120 - cutsceneTimer) / 20;
                 if (cutsceneTimer < 30) alpha = cutsceneTimer / 30;
                 
                 let xOffset = 0; let yOffset = 0;
-                if (cutsceneType === 'secret_unlock') {
+                if (cutsceneType === 'secret_unlock' || cutsceneType === 'glitch_start') {
                     xOffset = (Math.random() - 0.5) * 15;
                     yOffset = (Math.random() - 0.5) * 15;
                     alpha = Math.random() * 0.5 + 0.5;
@@ -1107,14 +1284,13 @@
             ctx.restore();
         }
 
-        // The Animation Loop runs endlessly now!
         function gameLoop() {
             update();
             draw();
             requestAnimationFrame(gameLoop);
         }
         
-        gameLoop(); // Initialize infinite loop
+        gameLoop(); 
     </script>
 </body>
 </html>
