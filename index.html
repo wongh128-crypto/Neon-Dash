@@ -665,6 +665,7 @@
         function handlePlayerHit() {
             if (glitch67Active) return; 
             if (postUpgradeInvincTimer > 0) return;
+            if (koalaNapActive) return; // FIX: Actually grants the 100s invincibility during the nap
 
             // ALIEN UFO SHIELD
             if (equippedSkin === 'alien' && alienShields > 0) {
